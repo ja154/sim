@@ -1,15 +1,18 @@
 import { MicrosoftTeamsIcon } from '@/components/icons'
 import type { BlockConfig } from '@/blocks/types'
+import { AuthMode } from '@/blocks/types'
 import type { MicrosoftTeamsResponse } from '@/tools/microsoft_teams/types'
 
 export const MicrosoftTeamsBlock: BlockConfig<MicrosoftTeamsResponse> = {
   type: 'microsoft_teams',
   name: 'Microsoft Teams',
   description: 'Read, write, and create messages',
+  authMode: AuthMode.OAuth,
   longDescription:
-    'Integrate Microsoft Teams functionality to manage messages. Read content from existing messages and write to messages using OAuth authentication. Supports text content manipulation for message creation and editing.',
+    'Integrate Microsoft Teams into the workflow. Can read and write chat messages, and read and write channel messages. Can be used in trigger mode to trigger a workflow when a message is sent to a chat or channel.',
   docsLink: 'https://docs.sim.ai/tools/microsoft_teams',
   category: 'tools',
+  triggerAllowed: true,
   bgColor: '#E0E0E0',
   icon: MicrosoftTeamsIcon,
   subBlocks: [
@@ -57,6 +60,7 @@ export const MicrosoftTeamsBlock: BlockConfig<MicrosoftTeamsResponse> = {
       title: 'Select Team',
       type: 'file-selector',
       layout: 'full',
+      canonicalParamId: 'teamId',
       provider: 'microsoft-teams',
       serviceId: 'microsoft-teams',
       requiredScopes: [],
@@ -70,6 +74,7 @@ export const MicrosoftTeamsBlock: BlockConfig<MicrosoftTeamsResponse> = {
       title: 'Team ID',
       type: 'short-input',
       layout: 'full',
+      canonicalParamId: 'teamId',
       placeholder: 'Enter team ID',
       mode: 'advanced',
       condition: { field: 'operation', value: ['read_channel', 'write_channel'] },
@@ -79,6 +84,7 @@ export const MicrosoftTeamsBlock: BlockConfig<MicrosoftTeamsResponse> = {
       title: 'Select Chat',
       type: 'file-selector',
       layout: 'full',
+      canonicalParamId: 'chatId',
       provider: 'microsoft-teams',
       serviceId: 'microsoft-teams',
       requiredScopes: [],
@@ -92,6 +98,7 @@ export const MicrosoftTeamsBlock: BlockConfig<MicrosoftTeamsResponse> = {
       title: 'Chat ID',
       type: 'short-input',
       layout: 'full',
+      canonicalParamId: 'chatId',
       placeholder: 'Enter chat ID',
       mode: 'advanced',
       condition: { field: 'operation', value: ['read_chat', 'write_chat'] },
@@ -101,6 +108,7 @@ export const MicrosoftTeamsBlock: BlockConfig<MicrosoftTeamsResponse> = {
       title: 'Select Channel',
       type: 'file-selector',
       layout: 'full',
+      canonicalParamId: 'channelId',
       provider: 'microsoft-teams',
       serviceId: 'microsoft-teams',
       requiredScopes: [],
@@ -114,6 +122,7 @@ export const MicrosoftTeamsBlock: BlockConfig<MicrosoftTeamsResponse> = {
       title: 'Channel ID',
       type: 'short-input',
       layout: 'full',
+      canonicalParamId: 'channelId',
       placeholder: 'Enter channel ID',
       mode: 'advanced',
       condition: { field: 'operation', value: ['read_channel', 'write_channel'] },
@@ -177,42 +186,27 @@ export const MicrosoftTeamsBlock: BlockConfig<MicrosoftTeamsResponse> = {
         const effectiveChatId = (chatId || manualChatId || '').trim()
         const effectiveChannelId = (channelId || manualChannelId || '').trim()
 
-        // Build the parameters based on operation type
         const baseParams = {
           ...rest,
           credential,
         }
 
-        // For chat operations, we need chatId
         if (operation === 'read_chat' || operation === 'write_chat') {
+          // Don't pass empty chatId - let the tool handle the error
           if (!effectiveChatId) {
-            throw new Error(
-              'Chat ID is required for chat operations. Please select a chat or enter a chat ID manually.'
-            )
+            throw new Error('Chat ID is required. Please select a chat or enter a chat ID.')
           }
-          return {
-            ...baseParams,
-            chatId: effectiveChatId,
-          }
+          return { ...baseParams, chatId: effectiveChatId }
         }
 
-        // For channel operations, we need teamId and channelId
         if (operation === 'read_channel' || operation === 'write_channel') {
           if (!effectiveTeamId) {
-            throw new Error(
-              'Team ID is required for channel operations. Please select a team or enter a team ID manually.'
-            )
+            throw new Error('Team ID is required for channel operations.')
           }
           if (!effectiveChannelId) {
-            throw new Error(
-              'Channel ID is required for channel operations. Please select a channel or enter a channel ID manually.'
-            )
+            throw new Error('Channel ID is required for channel operations.')
           }
-          return {
-            ...baseParams,
-            teamId: effectiveTeamId,
-            channelId: effectiveChannelId,
-          }
+          return { ...baseParams, teamId: effectiveTeamId, channelId: effectiveChannelId }
         }
 
         return baseParams

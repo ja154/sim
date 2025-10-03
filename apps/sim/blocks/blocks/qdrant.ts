@@ -1,13 +1,14 @@
 import { QdrantIcon } from '@/components/icons'
 import type { BlockConfig } from '@/blocks/types'
+import { AuthMode } from '@/blocks/types'
 import type { QdrantResponse } from '@/tools/qdrant/types'
 
 export const QdrantBlock: BlockConfig<QdrantResponse> = {
   type: 'qdrant',
   name: 'Qdrant',
   description: 'Use Qdrant vector database',
-  longDescription:
-    'Store, search, and retrieve vector embeddings using Qdrant. Perform semantic similarity searches and manage your vector collections.',
+  authMode: AuthMode.ApiKey,
+  longDescription: 'Integrate Qdrant into the workflow. Can upsert, search, and fetch points.',
   docsLink: 'https://qdrant.tech/documentation/',
   category: 'tools',
   bgColor: '#1A223F',

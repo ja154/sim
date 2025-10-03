@@ -1,17 +1,20 @@
 import { TelegramIcon } from '@/components/icons'
 import type { BlockConfig } from '@/blocks/types'
+import { AuthMode } from '@/blocks/types'
 import type { TelegramMessageResponse } from '@/tools/telegram/types'
 
 export const TelegramBlock: BlockConfig<TelegramMessageResponse> = {
   type: 'telegram',
   name: 'Telegram',
   description: 'Send messages through Telegram or trigger workflows from Telegram events',
+  authMode: AuthMode.BotToken,
   longDescription:
-    'Send messages to any Telegram channel using your Bot API key or trigger workflows from Telegram bot messages. Integrate automated notifications and alerts into your workflow to keep your team informed.',
+    'Integrate Telegram into the workflow. Can send messages. Can be used in trigger mode to trigger a workflow when a message is sent to a chat.',
   docsLink: 'https://docs.sim.ai/tools/telegram',
   category: 'tools',
   bgColor: '#E0E0E0',
   icon: TelegramIcon,
+  triggerAllowed: true,
   subBlocks: [
     {
       id: 'botToken',

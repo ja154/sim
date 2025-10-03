@@ -1,15 +1,18 @@
 import { OutlookIcon } from '@/components/icons'
 import type { BlockConfig } from '@/blocks/types'
+import { AuthMode } from '@/blocks/types'
 import type { OutlookResponse } from '@/tools/outlook/types'
 
 export const OutlookBlock: BlockConfig<OutlookResponse> = {
   type: 'outlook',
   name: 'Outlook',
   description: 'Access Outlook',
+  authMode: AuthMode.OAuth,
   longDescription:
-    'Integrate Outlook functionality to read, draft, andsend email messages within your workflow. Automate email communications and process email content using OAuth authentication.',
+    'Integrate Outlook into the workflow. Can read, draft, and send email messages. Can be used in trigger mode to trigger a workflow when a new email is received.',
   docsLink: 'https://docs.sim.ai/tools/outlook',
   category: 'tools',
+  triggerAllowed: true,
   bgColor: '#E0E0E0',
   icon: OutlookIcon,
   subBlocks: [
@@ -142,6 +145,7 @@ export const OutlookBlock: BlockConfig<OutlookResponse> = {
       title: 'Folder',
       type: 'folder-selector',
       layout: 'full',
+      canonicalParamId: 'folder',
       provider: 'outlook',
       serviceId: 'outlook',
       requiredScopes: ['Mail.ReadWrite', 'Mail.ReadBasic', 'Mail.Read'],
@@ -156,6 +160,7 @@ export const OutlookBlock: BlockConfig<OutlookResponse> = {
       title: 'Folder',
       type: 'short-input',
       layout: 'full',
+      canonicalParamId: 'folder',
       placeholder: 'Enter Outlook folder name (e.g., INBOX, SENT, or custom folder)',
       mode: 'advanced',
       condition: { field: 'operation', value: 'read_outlook' },
@@ -196,13 +201,11 @@ export const OutlookBlock: BlockConfig<OutlookResponse> = {
         }
       },
       params: (params) => {
-        // Pass the credential directly from the credential field
         const { credential, folder, manualFolder, ...rest } = params
 
-        // Handle folder input (selector or manual)
+        // Handle both selector and manual folder input
         const effectiveFolder = (folder || manualFolder || '').trim()
 
-        // Set default folder to INBOX if not specified
         if (rest.operation === 'read_outlook') {
           rest.folder = effectiveFolder || 'INBOX'
         }

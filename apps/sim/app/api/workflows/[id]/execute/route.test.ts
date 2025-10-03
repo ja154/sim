@@ -46,6 +46,11 @@ describe('Workflow Execution API Route', () => {
           remaining: 10,
           resetAt: new Date(),
         }),
+        checkRateLimitWithSubscription: vi.fn().mockResolvedValue({
+          allowed: true,
+          remaining: 10,
+          resetAt: new Date(),
+        }),
       })),
       RateLimitError: class RateLimitError extends Error {
         constructor(
@@ -66,7 +71,14 @@ describe('Workflow Execution API Route', () => {
       }),
     }))
 
-    vi.doMock('@/db/schema', () => ({
+    vi.doMock('@/lib/billing/core/subscription', () => ({
+      getHighestPrioritySubscription: vi.fn().mockResolvedValue({
+        plan: 'free',
+        referenceId: 'user-id',
+      }),
+    }))
+
+    vi.doMock('@sim/db/schema', () => ({
       subscription: {
         plan: 'plan',
         referenceId: 'referenceId',
@@ -150,6 +162,7 @@ describe('Workflow Execution API Route', () => {
       }),
       isHosted: vi.fn().mockReturnValue(false),
       getRotatingApiKey: vi.fn().mockReturnValue('rotated-api-key'),
+      generateRequestId: vi.fn(() => 'test-request-id'),
     }))
 
     vi.doMock('@/lib/logs/execution/logging-session', () => ({
@@ -192,7 +205,7 @@ describe('Workflow Execution API Route', () => {
       }),
     }))
 
-    vi.doMock('@/db', () => {
+    vi.doMock('@sim/db', () => {
       const mockDb = {
         select: vi.fn().mockImplementation((columns) => ({
           from: vi.fn().mockImplementation((table) => ({
@@ -279,7 +292,7 @@ describe('Workflow Execution API Route', () => {
     const Executor = (await import('@/executor')).Executor
     expect(Executor).toHaveBeenCalled()
 
-    expect(executeMock).toHaveBeenCalledWith('workflow-id')
+    expect(executeMock).toHaveBeenCalledWith('workflow-id', 'starter-id')
   })
 
   /**
@@ -324,7 +337,7 @@ describe('Workflow Execution API Route', () => {
     const Executor = (await import('@/executor')).Executor
     expect(Executor).toHaveBeenCalled()
 
-    expect(executeMock).toHaveBeenCalledWith('workflow-id')
+    expect(executeMock).toHaveBeenCalledWith('workflow-id', 'starter-id')
 
     expect(Executor).toHaveBeenCalledWith(
       expect.objectContaining({

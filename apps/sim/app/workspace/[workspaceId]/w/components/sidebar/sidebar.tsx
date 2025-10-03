@@ -32,6 +32,7 @@ import {
   getKeyboardShortcutText,
   useGlobalShortcuts,
 } from '@/app/workspace/[workspaceId]/w/hooks/use-keyboard-shortcuts'
+import { useKnowledgeBasesList } from '@/hooks/use-knowledge'
 import { useSubscriptionStore } from '@/stores/subscription/store'
 import { useWorkflowDiffStore } from '@/stores/workflow-diff/store'
 import { useWorkflowRegistry } from '@/stores/workflows/registry/store'
@@ -114,6 +115,9 @@ export function Sidebar() {
   // Template data for search modal
   const [templates, setTemplates] = useState<TemplateData[]>([])
   const [isTemplatesLoading, setIsTemplatesLoading] = useState(false)
+
+  // Knowledge bases for search modal
+  const { knowledgeBases } = useKnowledgeBasesList(workspaceId)
 
   // Refs
   const workflowScrollAreaRef = useRef<HTMLDivElement | null>(null)
@@ -691,21 +695,13 @@ export function Sidebar() {
         }
       })
 
-      // Sort by last modified date (newest first)
-      const sortByLastModified = (a: WorkflowMetadata, b: WorkflowMetadata) => {
-        const dateA =
-          a.lastModified instanceof Date
-            ? a.lastModified.getTime()
-            : new Date(a.lastModified).getTime()
-        const dateB =
-          b.lastModified instanceof Date
-            ? b.lastModified.getTime()
-            : new Date(b.lastModified).getTime()
-        return dateB - dateA
+      // Sort by creation date (newest first) for stable ordering
+      const sortByCreatedAt = (a: WorkflowMetadata, b: WorkflowMetadata) => {
+        return b.createdAt.getTime() - a.createdAt.getTime()
       }
 
-      regular.sort(sortByLastModified)
-      temp.sort(sortByLastModified)
+      regular.sort(sortByCreatedAt)
+      temp.sort(sortByCreatedAt)
     }
 
     return { regularWorkflows: regular, tempWorkflows: temp }
@@ -733,6 +729,17 @@ export function Sidebar() {
       isCurrent: workspace.id === workspaceId,
     }))
   }, [workspaces, workspaceId])
+
+  // Prepare knowledge bases for search modal
+  const searchKnowledgeBases = useMemo(() => {
+    return knowledgeBases.map((kb) => ({
+      id: kb.id,
+      name: kb.name,
+      description: kb.description,
+      href: `/workspace/${workspaceId}/knowledge/${kb.id}`,
+      isCurrent: knowledgeBaseId === kb.id,
+    }))
+  }, [knowledgeBases, workspaceId, knowledgeBaseId])
 
   // Create workflow handler
   const handleCreateWorkflow = async (folderId?: string): Promise<string> => {
@@ -1043,10 +1050,9 @@ export function Sidebar() {
       <SearchModal
         open={showSearchModal}
         onOpenChange={setShowSearchModal}
-        templates={templates}
         workflows={searchWorkflows}
         workspaces={searchWorkspaces}
-        loading={isTemplatesLoading}
+        knowledgeBases={searchKnowledgeBases}
         isOnWorkflowPage={isOnWorkflowPage}
       />
     </>

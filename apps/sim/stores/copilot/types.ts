@@ -45,10 +45,13 @@ export interface CopilotMessage {
 export type ChatContext =
   | { kind: 'past_chat'; chatId: string; label: string }
   | { kind: 'workflow'; workflowId: string; label: string }
+  | { kind: 'current_workflow'; workflowId: string; label: string }
   | { kind: 'blocks'; blockIds: string[]; label: string }
-  | { kind: 'logs'; label: string }
+  | { kind: 'logs'; executionId?: string; label: string }
+  | { kind: 'workflow_block'; workflowId: string; blockId: string; label: string }
   | { kind: 'knowledge'; knowledgeId?: string; label: string }
   | { kind: 'templates'; templateId?: string; label: string }
+  | { kind: 'docs'; label: string }
 
 export interface CopilotChat {
   id: string
@@ -65,8 +68,19 @@ export type CopilotMode = 'ask' | 'agent'
 
 export interface CopilotState {
   mode: CopilotMode
-  agentDepth: 0 | 1 | 2 | 3
+  selectedModel:
+    | 'gpt-5-fast'
+    | 'gpt-5'
+    | 'gpt-5-medium'
+    | 'gpt-5-high'
+    | 'gpt-4o'
+    | 'gpt-4.1'
+    | 'o3'
+    | 'claude-4-sonnet'
+    | 'claude-4.5-sonnet'
+    | 'claude-4.1-opus'
   agentPrefetch: boolean
+  isCollapsed: boolean
 
   currentChat: CopilotChat | null
   chats: CopilotChat[]
@@ -101,11 +115,19 @@ export interface CopilotState {
 
   // Map of toolCallId -> CopilotToolCall for quick access during streaming
   toolCallsById: Record<string, CopilotToolCall>
+
+  // Transient flag to prevent auto-selecting a chat during new-chat UX
+  suppressAutoSelect?: boolean
+
+  // Explicitly track the current user message id for this in-flight query (for stats/diff correlation)
+  currentUserMessageId?: string | null
+
+  // Per-message metadata captured at send-time for reliable stats
 }
 
 export interface CopilotActions {
   setMode: (mode: CopilotMode) => void
-  setAgentDepth: (depth: 0 | 1 | 2 | 3) => void
+  setSelectedModel: (model: CopilotStore['selectedModel']) => void
   setAgentPrefetch: (prefetch: boolean) => void
 
   setWorkflowId: (workflowId: string | null) => Promise<void>
@@ -165,7 +187,8 @@ export interface CopilotActions {
   handleStreamingResponse: (
     stream: ReadableStream,
     messageId: string,
-    isContinuation?: boolean
+    isContinuation?: boolean,
+    triggerUserMessageId?: string
   ) => Promise<void>
   handleNewChatCreation: (newChatId: string) => Promise<void>
   updateDiffStore: (yamlContent: string, toolName?: string) => Promise<void>

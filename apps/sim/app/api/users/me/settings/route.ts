@@ -1,11 +1,12 @@
+import { db } from '@sim/db'
+import { settings } from '@sim/db/schema'
 import { eq } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getSession } from '@/lib/auth'
 import { createLogger } from '@/lib/logs/console/logger'
-import { db } from '@/db'
-import { settings } from '@/db/schema'
+import { generateRequestId } from '@/lib/utils'
 
 const logger = createLogger('UserSettingsAPI')
 
@@ -24,6 +25,9 @@ const SettingsSchema = z.object({
       unsubscribeNotifications: z.boolean().optional(),
     })
     .optional(),
+  billingUsageNotificationsEnabled: z.boolean().optional(),
+  showFloatingControls: z.boolean().optional(),
+  showTrainingControls: z.boolean().optional(),
 })
 
 // Default settings values
@@ -35,10 +39,13 @@ const defaultSettings = {
   consoleExpandedByDefault: true,
   telemetryEnabled: true,
   emailPreferences: {},
+  billingUsageNotificationsEnabled: true,
+  showFloatingControls: true,
+  showTrainingControls: false,
 }
 
 export async function GET() {
-  const requestId = crypto.randomUUID().slice(0, 8)
+  const requestId = generateRequestId()
 
   try {
     const session = await getSession()
@@ -68,6 +75,9 @@ export async function GET() {
           consoleExpandedByDefault: userSettings.consoleExpandedByDefault,
           telemetryEnabled: userSettings.telemetryEnabled,
           emailPreferences: userSettings.emailPreferences ?? {},
+          billingUsageNotificationsEnabled: userSettings.billingUsageNotificationsEnabled ?? true,
+          showFloatingControls: userSettings.showFloatingControls ?? true,
+          showTrainingControls: userSettings.showTrainingControls ?? false,
         },
       },
       { status: 200 }
@@ -80,7 +90,7 @@ export async function GET() {
 }
 
 export async function PATCH(request: Request) {
-  const requestId = crypto.randomUUID().slice(0, 8)
+  const requestId = generateRequestId()
 
   try {
     const session = await getSession()

@@ -1,5 +1,5 @@
-import { env } from '@/lib/env'
 import { createLogger } from '@/lib/logs/console/logger'
+import { getBaseUrl } from '@/lib/urls/utils'
 import { generateRouterPrompt } from '@/blocks/blocks/router'
 import type { BlockOutput } from '@/blocks/types'
 import { BlockType } from '@/executor/consts'
@@ -40,8 +40,7 @@ export class RouterBlockHandler implements BlockHandler {
     const providerId = getProviderFromModel(routerConfig.model)
 
     try {
-      const baseUrl = env.NEXT_PUBLIC_APP_URL || ''
-      const url = new URL('/api/providers', baseUrl)
+      const url = new URL('/api/providers', getBaseUrl())
 
       // Create the provider request with proper message formatting
       const messages = [{ role: 'user', content: routerConfig.prompt }]
@@ -51,7 +50,7 @@ export class RouterBlockHandler implements BlockHandler {
         model: routerConfig.model,
         systemPrompt: systemPrompt,
         context: JSON.stringify(messages),
-        temperature: routerConfig.temperature,
+        temperature: 0.1,
         apiKey: routerConfig.apiKey,
         workflowId: context.workflowId,
       }
@@ -102,7 +101,7 @@ export class RouterBlockHandler implements BlockHandler {
       )
 
       return {
-        content: inputs.prompt,
+        prompt: inputs.prompt,
         model: result.model,
         tokens: {
           prompt: tokens.prompt || 0,

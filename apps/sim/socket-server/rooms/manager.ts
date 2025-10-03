@@ -1,14 +1,13 @@
+import * as schema from '@sim/db/schema'
+import { workflowBlocks, workflowEdges } from '@sim/db/schema'
 import { and, eq, isNull } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
 import type { Server } from 'socket.io'
 import { env } from '@/lib/env'
 import { createLogger } from '@/lib/logs/console/logger'
-import * as schema from '@/db/schema'
-import { workflowBlocks, workflowEdges } from '@/db/schema'
 
-// Create dedicated database connection for room manager
-const connectionString = env.POSTGRES_URL ?? env.DATABASE_URL
+const connectionString = env.DATABASE_URL
 const db = drizzle(
   postgres(connectionString, {
     prepare: false,
@@ -258,6 +257,10 @@ export class RoomManager {
       const roomPresence = Array.from(room.users.values())
       this.io.to(workflowId).emit('presence-update', roomPresence)
     }
+  }
+
+  emitToWorkflow<T = unknown>(workflowId: string, event: string, payload: T): void {
+    this.io.to(workflowId).emit(event, payload)
   }
 
   /**

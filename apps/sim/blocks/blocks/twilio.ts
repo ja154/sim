@@ -1,12 +1,14 @@
 import { TwilioIcon } from '@/components/icons'
 import type { BlockConfig } from '@/blocks/types'
+import { AuthMode } from '@/blocks/types'
 import type { TwilioSMSBlockOutput } from '@/tools/twilio/types'
 
 export const TwilioSMSBlock: BlockConfig<TwilioSMSBlockOutput> = {
   type: 'twilio_sms',
   name: 'Twilio SMS',
   description: 'Send SMS messages',
-  longDescription: 'Send text messages to single or multiple recipients using the Twilio API.',
+  authMode: AuthMode.ApiKey,
+  longDescription: 'Integrate Twilio into the workflow. Can send SMS messages.',
   category: 'tools',
   bgColor: '#F22F46', // Twilio brand color
   icon: TwilioIcon,

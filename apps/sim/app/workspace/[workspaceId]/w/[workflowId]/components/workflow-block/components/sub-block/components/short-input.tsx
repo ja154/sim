@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Wand2 } from 'lucide-react'
+import { useParams } from 'next/navigation'
 import { useReactFlow } from 'reactflow'
 import { Button } from '@/components/ui/button'
 import { checkEnvVarTrigger, EnvVarDropdown } from '@/components/ui/env-var-dropdown'
@@ -10,10 +11,10 @@ import { createLogger } from '@/lib/logs/console/logger'
 import { cn } from '@/lib/utils'
 import { WandPromptBar } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/wand-prompt-bar/wand-prompt-bar'
 import { useSubBlockValue } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/workflow-block/components/sub-block/hooks/use-sub-block-value'
+import { useAccessibleReferencePrefixes } from '@/app/workspace/[workspaceId]/w/[workflowId]/hooks/use-accessible-reference-prefixes'
 import { useWand } from '@/app/workspace/[workspaceId]/w/[workflowId]/hooks/use-wand'
 import type { SubBlockConfig } from '@/blocks/types'
 import { useTagSelection } from '@/hooks/use-tag-selection'
-import { useOperationQueueStore } from '@/stores/operation-queue/store'
 
 const logger = createLogger('ShortInput')
 
@@ -84,6 +85,9 @@ export function ShortInput({
   const [activeSourceBlockId, setActiveSourceBlockId] = useState<string | null>(null)
 
   const emitTagSelection = useTagSelection(blockId, subBlockId)
+
+  const params = useParams()
+  const workspaceId = params.workspaceId as string
 
   // Get ReactFlow instance for zoom control
   const reactFlowInstance = useReactFlow()
@@ -199,7 +203,7 @@ export function ShortInput({
   }, [value])
 
   // Handle paste events to ensure long values are handled correctly
-  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+  const handlePaste = (_e: React.ClipboardEvent<HTMLInputElement>) => {
     // Let the paste happen normally
     // Then ensure scroll positions are synced after the content is updated
     setTimeout(() => {
@@ -342,6 +346,8 @@ export function ShortInput({
     }
   }
 
+  const accessiblePrefixes = useAccessibleReferencePrefixes(blockId)
+
   return (
     <>
       <WandPromptBar
@@ -363,7 +369,7 @@ export function ShortInput({
         <Input
           ref={inputRef}
           className={cn(
-            'allow-scroll w-full overflow-auto text-transparent caret-foreground placeholder:text-muted-foreground/50',
+            'allow-scroll w-full overflow-auto text-transparent caret-foreground [-ms-overflow-style:none] [scrollbar-width:none] placeholder:text-muted-foreground/50 [&::-webkit-scrollbar]:hidden',
             isConnecting &&
               config?.connectionDroppable !== false &&
               'ring-2 ring-blue-500 ring-offset-2 focus-visible:ring-blue-500'
@@ -392,9 +398,6 @@ export function ShortInput({
           onBlur={() => {
             setIsFocused(false)
             setShowEnvVars(false)
-            try {
-              useOperationQueueStore.getState().flushDebouncedForBlock(blockId)
-            } catch {}
           }}
           onDrop={handleDrop}
           onDragOver={handleDragOver}
@@ -403,13 +406,13 @@ export function ShortInput({
           onWheel={handleWheel}
           onKeyDown={handleKeyDown}
           autoComplete='off'
-          style={{ overflowX: 'auto' }}
+          style={{ overflowX: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
           disabled={disabled}
         />
         <div
           ref={overlayRef}
-          className='pointer-events-none absolute inset-0 flex items-center overflow-x-auto bg-transparent px-3 text-sm'
-          style={{ overflowX: 'auto' }}
+          className='pointer-events-none absolute inset-0 flex items-center overflow-x-auto bg-transparent px-3 text-sm [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
+          style={{ overflowX: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
         >
           <div
             className='w-full whitespace-pre'
@@ -417,7 +420,10 @@ export function ShortInput({
           >
             {password && !isFocused
               ? '•'.repeat(value?.toString().length ?? 0)
-              : formatDisplayText(value?.toString() ?? '', true)}
+              : formatDisplayText(value?.toString() ?? '', {
+                  accessiblePrefixes,
+                  highlightAll: !accessiblePrefixes,
+                })}
           </div>
         </div>
 
@@ -432,7 +438,7 @@ export function ShortInput({
               }
               disabled={wandHook.isLoading || wandHook.isStreaming || disabled}
               aria-label='Generate content with AI'
-              className='h-8 w-8 rounded-full border border-transparent bg-muted/80 text-muted-foreground shadow-sm transition-all duration-200 hover:border-primary/20 hover:bg-muted hover:text-primary hover:shadow'
+              className='h-8 w-8 rounded-full border border-transparent bg-muted/80 text-muted-foreground shadow-sm transition-all duration-200 hover:border-primary/20 hover:bg-muted hover:text-foreground hover:shadow'
             >
               <Wand2 className='h-4 w-4' />
             </Button>
@@ -447,6 +453,7 @@ export function ShortInput({
               searchTerm={searchTerm}
               inputValue={value?.toString() ?? ''}
               cursorPosition={cursorPosition}
+              workspaceId={workspaceId}
               onClose={() => {
                 setShowEnvVars(false)
                 setSearchTerm('')

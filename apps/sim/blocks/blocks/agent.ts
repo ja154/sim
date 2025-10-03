@@ -2,6 +2,7 @@ import { AgentIcon } from '@/components/icons'
 import { isHosted } from '@/lib/environment'
 import { createLogger } from '@/lib/logs/console/logger'
 import type { BlockConfig } from '@/blocks/types'
+import { AuthMode } from '@/blocks/types'
 import {
   getAllModelProviders,
   getBaseModelProviders,
@@ -14,13 +15,11 @@ import {
   supportsTemperature,
 } from '@/providers/utils'
 
-// Get current Ollama models dynamically
 const getCurrentOllamaModels = () => {
-  return useOllamaStore.getState().models
+  return useProvidersStore.getState().providers.ollama.models
 }
 
-import { useOllamaStore } from '@/stores/ollama/store'
-import { useOpenRouterStore } from '@/stores/openrouter/store'
+import { useProvidersStore } from '@/stores/providers/store'
 import type { ToolResponse } from '@/tools/types'
 
 const logger = createLogger('AgentBlock')
@@ -63,11 +62,17 @@ export const AgentBlock: BlockConfig<AgentResponse> = {
   type: 'agent',
   name: 'Agent',
   description: 'Build an agent',
+  authMode: AuthMode.ApiKey,
   longDescription:
-    'Create powerful AI agents using any LLM provider with customizable system prompts and tool integrations.',
+    'The Agent block is a core workflow block that is a wrapper around an LLM. It takes in system/user prompts and calls an LLM provider. It can also make tool calls by directly containing tools inside of its tool input. It can additionally return structured output.',
+  bestPractices: `
+  - Cannot use core blocks like API, Webhook, Function, Workflow, Memory as tools. Only integrations or custom tools. 
+  - Check custom tools examples for YAML syntax. Only construct these if there isn't an existing integration for that purpose.
+  - Response Format should be a valid JSON Schema. This determines the output of the agent only if present. Fields can be accessed at root level by the following blocks: e.g. <agent1.field>. If response format is not present, the agent will return the standard outputs: content, model, tokens, toolCalls.
+  `,
   docsLink: 'https://docs.sim.ai/blocks/agent',
   category: 'blocks',
-  bgColor: 'var(--brand-primary-hover-hex)',
+  bgColor: 'var(--brand-primary-hex)',
   icon: AgentIcon,
   subBlocks: [
     {
@@ -158,8 +163,9 @@ Create a system prompt appropriately detailed for the request, using clear langu
       placeholder: 'Type or select a model...',
       required: true,
       options: () => {
-        const ollamaModels = useOllamaStore.getState().models
-        const openrouterModels = useOpenRouterStore.getState().models
+        const providersState = useProvidersStore.getState()
+        const ollamaModels = providersState.providers.ollama.models
+        const openrouterModels = providersState.providers.openrouter.models
         const baseModels = Object.keys(getBaseModelProviders())
         const allModels = Array.from(new Set([...baseModels, ...ollamaModels, ...openrouterModels]))
 
@@ -176,6 +182,7 @@ Create a system prompt appropriately detailed for the request, using clear langu
       layout: 'half',
       min: 0,
       max: 1,
+      defaultValue: 0.5,
       condition: () => ({
         field: 'model',
         value: (() => {
@@ -193,6 +200,7 @@ Create a system prompt appropriately detailed for the request, using clear langu
       layout: 'half',
       min: 0,
       max: 2,
+      defaultValue: 1,
       condition: () => ({
         field: 'model',
         value: (() => {
@@ -290,6 +298,7 @@ Create a system prompt appropriately detailed for the request, using clear langu
       title: 'Tools',
       type: 'tool-input',
       layout: 'full',
+      defaultValue: [],
     },
     {
       id: 'responseFormat',
@@ -423,7 +432,6 @@ Example 3 (Array Input):
               return usageControl !== 'none'
             })
             .map((tool: any) => {
-              // Get the base tool configuration
               const toolConfig = {
                 id:
                   tool.type === 'custom-tool'
@@ -432,8 +440,9 @@ Example 3 (Array Input):
                 name: tool.title,
                 description: tool.type === 'custom-tool' ? tool.schema?.function?.description : '',
                 params: tool.params || {},
-                parameters: tool.type === 'custom-tool' ? tool.schema?.function?.parameters : {}, // We'd need to get actual parameters for non-custom tools
+                parameters: tool.type === 'custom-tool' ? tool.schema?.function?.parameters : {},
                 usageControl: tool.usageControl || 'auto',
+                type: tool.type,
               }
               return toolConfig
             })
@@ -445,13 +454,6 @@ Example 3 (Array Input):
 
           if (filteredOutTools.length > 0) {
             logger.info('Filtered out tools set to none', { tools: filteredOutTools.join(', ') })
-          }
-
-          logger.info('Transformed tools', { tools: transformedTools })
-          if (transformedTools.length === 0) {
-            logger.info('No tools will be passed to the provider after filtering')
-          } else {
-            logger.info('Tools passed to provider', { count: transformedTools.length })
           }
 
           return { ...params, tools: transformedTools }

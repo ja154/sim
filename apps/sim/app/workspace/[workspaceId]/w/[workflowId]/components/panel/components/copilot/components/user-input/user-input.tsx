@@ -12,7 +12,9 @@ import {
   ArrowUp,
   AtSign,
   Blocks,
+  BookOpen,
   Bot,
+  Box,
   Brain,
   BrainCircuit,
   Check,
@@ -27,6 +29,7 @@ import {
   Package,
   Paperclip,
   Shapes,
+  SquareChevronRight,
   Workflow,
   X,
   Zap,
@@ -48,9 +51,9 @@ import {
 import { useSession } from '@/lib/auth-client'
 import { createLogger } from '@/lib/logs/console/logger'
 import { cn } from '@/lib/utils'
-import { CopilotSlider } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/panel/components/copilot/components/user-input/components/copilot-slider'
 import { useCopilotStore } from '@/stores/copilot/store'
 import type { ChatContext } from '@/stores/copilot/types'
+import { useWorkflowStore } from '@/stores/workflows/workflow/store'
 
 const logger = createLogger('CopilotUserInput')
 
@@ -118,18 +121,29 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
     const [isDragging, setIsDragging] = useState(false)
     const [dragCounter, setDragCounter] = useState(0)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
+    const overlayRef = useRef<HTMLDivElement>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
     const [showMentionMenu, setShowMentionMenu] = useState(false)
     const mentionMenuRef = useRef<HTMLDivElement>(null)
     const submenuRef = useRef<HTMLDivElement>(null)
     const menuListRef = useRef<HTMLDivElement>(null)
     const [mentionActiveIndex, setMentionActiveIndex] = useState(0)
-    const mentionOptions = ['Chats', 'Workflows', 'Blocks', 'Knowledge', 'Templates']
+    const mentionOptions = [
+      'Chats',
+      'Workflows',
+      'Workflow Blocks',
+      'Blocks',
+      'Knowledge',
+      'Docs',
+      'Templates',
+      'Logs',
+    ]
     const [openSubmenuFor, setOpenSubmenuFor] = useState<string | null>(null)
     const [submenuActiveIndex, setSubmenuActiveIndex] = useState(0)
     const [inAggregated, setInAggregated] = useState(false)
-    const isSubmenu = (v: 'Chats' | 'Workflows' | 'Knowledge' | 'Blocks' | 'Templates') =>
-      openSubmenuFor === v
+    const isSubmenu = (
+      v: 'Chats' | 'Workflows' | 'Workflow Blocks' | 'Knowledge' | 'Blocks' | 'Templates' | 'Logs'
+    ) => openSubmenuFor === v
     const [pastChats, setPastChats] = useState<
       Array<{ id: string; title: string | null; workflowId: string | null; updatedAt?: string }>
     >([])
@@ -151,11 +165,32 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
     >([])
     const [isLoadingTemplates, setIsLoadingTemplates] = useState(false)
     // const [templatesQuery, setTemplatesQuery] = useState('')
+    // Add logs list state
+    const [logsList, setLogsList] = useState<
+      Array<{
+        id: string
+        executionId?: string
+        level: string
+        trigger: string | null
+        createdAt: string
+        workflowName: string
+      }>
+    >([])
+    const [isLoadingLogs, setIsLoadingLogs] = useState(false)
 
     const { data: session } = useSession()
     const { currentChat, workflowId } = useCopilotStore()
     const params = useParams()
     const workspaceId = params.workspaceId as string
+    // Track per-chat preference for auto-adding workflow context
+    const [workflowAutoAddDisabledMap, setWorkflowAutoAddDisabledMap] = useState<
+      Record<string, boolean>
+    >({})
+    // Also track for new chats (no ID yet)
+    const [newChatWorkflowDisabled, setNewChatWorkflowDisabled] = useState(false)
+    const workflowAutoAddDisabled = currentChat?.id
+      ? workflowAutoAddDisabledMap[currentChat.id] || false
+      : newChatWorkflowDisabled
 
     // Determine placeholder based on mode
     const effectivePlaceholder =
@@ -182,17 +217,138 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
     const setMessage =
       controlledValue !== undefined ? onControlledChange || (() => {}) : setInternalMessage
 
+    // Load workflows on mount if we have a workflowId
+    useEffect(() => {
+      if (workflowId && workflows.length === 0) {
+        ensureWorkflowsLoaded()
+      }
+    }, [workflowId])
+
+    // Track the last chat ID we've seen to detect chat changes
+    const [lastChatId, setLastChatId] = useState<string | undefined>(undefined)
+    // Track if we just sent a message to avoid re-adding context after submit
+    const [justSentMessage, setJustSentMessage] = useState(false)
+
+    // Reset states when switching to a truly new chat
+    useEffect(() => {
+      const currentChatId = currentChat?.id
+
+      // Detect when we're switching to a different chat
+      if (lastChatId !== currentChatId) {
+        // If switching to a new chat (undefined ID) from a different state
+        // reset the disabled flag so each new chat starts fresh
+        if (!currentChatId && lastChatId !== undefined) {
+          setNewChatWorkflowDisabled(false)
+        }
+
+        // If a new chat just got an ID assigned, transfer the disabled state
+        if (currentChatId && !lastChatId && newChatWorkflowDisabled) {
+          setWorkflowAutoAddDisabledMap((prev) => ({
+            ...prev,
+            [currentChatId]: true,
+          }))
+          // Keep newChatWorkflowDisabled as false for the next new chat
+          setNewChatWorkflowDisabled(false)
+        }
+
+        // Reset the "just sent" flag when switching chats
+        setJustSentMessage(false)
+
+        setLastChatId(currentChatId)
+      }
+    }, [currentChat?.id, lastChatId, newChatWorkflowDisabled])
+
+    // Auto-add workflow context when message is empty and not disabled
+    useEffect(() => {
+      // Don't auto-add if disabled or no workflow
+      if (!workflowId || workflowAutoAddDisabled) return
+
+      // Don't auto-add right after sending a message
+      if (justSentMessage) return
+
+      // Only add when message is empty (new message being composed)
+      if (message && message.trim().length > 0) return
+
+      // Check if current_workflow context already exists
+      const hasCurrentWorkflowContext = selectedContexts.some(
+        (ctx) => ctx.kind === 'current_workflow' && (ctx as any).workflowId === workflowId
+      )
+      if (hasCurrentWorkflowContext) {
+        return
+      }
+
+      const addWorkflowContext = async () => {
+        // Double-check disabled state right before adding
+        if (workflowAutoAddDisabled) return
+
+        // Get workflow name
+        let workflowName = 'Current Workflow'
+
+        // Try loaded workflows first
+        const existingWorkflow = workflows.find((w) => w.id === workflowId)
+        if (existingWorkflow) {
+          workflowName = existingWorkflow.name
+        } else if (workflows.length === 0) {
+          // If workflows not loaded yet, try to fetch this specific one
+          try {
+            const resp = await fetch(`/api/workflows/${workflowId}`)
+            if (resp.ok) {
+              const data = await resp.json()
+              workflowName = data?.data?.name || 'Current Workflow'
+            }
+          } catch {}
+        }
+
+        // Add current_workflow context using functional update to prevent duplicates
+        setSelectedContexts((prev) => {
+          const alreadyHasCurrentWorkflow = prev.some(
+            (ctx) => ctx.kind === 'current_workflow' && (ctx as any).workflowId === workflowId
+          )
+          if (alreadyHasCurrentWorkflow) return prev
+
+          return [
+            ...prev,
+            { kind: 'current_workflow', workflowId, label: workflowName } as ChatContext,
+          ]
+        })
+      }
+
+      addWorkflowContext()
+    }, [workflowId, workflowAutoAddDisabled, workflows.length, message, justSentMessage]) // Re-run when message changes
+
     // Auto-resize textarea and toggle vertical scroll when exceeding max height
     useEffect(() => {
       const textarea = textareaRef.current
+      const overlay = overlayRef.current
       if (textarea) {
         const maxHeight = 120
         textarea.style.height = 'auto'
         const nextHeight = Math.min(textarea.scrollHeight, maxHeight)
         textarea.style.height = `${nextHeight}px`
         textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden'
+
+        // Also update overlay height to match
+        if (overlay) {
+          overlay.style.height = `${nextHeight}px`
+          overlay.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden'
+        }
       }
     }, [message])
+
+    // Sync scroll position between textarea and overlay
+    useEffect(() => {
+      const textarea = textareaRef.current
+      const overlay = overlayRef.current
+
+      if (!textarea || !overlay) return
+
+      const handleScroll = () => {
+        overlay.scrollTop = textarea.scrollTop
+      }
+
+      textarea.addEventListener('scroll', handleScroll)
+      return () => textarea.removeEventListener('scroll', handleScroll)
+    }, [])
 
     // Close mention menu on outside click
     useEffect(() => {
@@ -251,7 +407,7 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
       if (isLoadingWorkflows || workflows.length > 0) return
       try {
         setIsLoadingWorkflows(true)
-        const resp = await fetch('/api/workflows/sync')
+        const resp = await fetch('/api/workflows')
         if (!resp.ok) throw new Error(`Failed to load workflows: ${resp.status}`)
         const data = await resp.json()
         const items = Array.isArray(data?.data) ? data.data : []
@@ -259,11 +415,11 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
         const workspaceFiltered = items.filter(
           (w: any) => w.workspaceId === workspaceId || !w.workspaceId
         )
-        // Sort by last modified/updated (newest first), matching sidebar behavior
+        // Sort by creation date (newest first) for stable ordering, matching sidebar behavior
         const sorted = [...workspaceFiltered].sort((a: any, b: any) => {
-          const ta = new Date(a.lastModified || a.updatedAt || a.createdAt || 0).getTime()
-          const tb = new Date(b.lastModified || b.updatedAt || b.createdAt || 0).getTime()
-          return tb - ta
+          const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0
+          const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0
+          return dateB - dateA // Newest first for stable ordering
         })
         setWorkflows(
           sorted.map((w: any) => ({
@@ -506,7 +662,7 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
       }
     }
 
-    const handleSubmit = () => {
+    const handleSubmit = async () => {
       const trimmedMessage = message.trim()
       if (!trimmedMessage || disabled || isLoading) return
 
@@ -527,7 +683,16 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
           size: f.size,
         }))
 
-      onSubmit(trimmedMessage, fileAttachments, selectedContexts)
+      // Build contexts to send: hide current_workflow in UI but always include it in payload
+      const uiContexts = selectedContexts.filter((c) => (c as any).kind !== 'current_workflow')
+      const finalContexts: any[] = [...uiContexts]
+
+      if (workflowId) {
+        // Include current_workflow for the agent; label not shown in UI
+        finalContexts.push({ kind: 'current_workflow', workflowId, label: 'Current Workflow' })
+      }
+
+      onSubmit(trimmedMessage, fileAttachments, finalContexts as any)
 
       // Clean up preview URLs before clearing
       attachedFiles.forEach((f) => {
@@ -543,7 +708,19 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
         setInternalMessage('')
       }
       setAttachedFiles([])
-      setSelectedContexts([])
+
+      // Clear @mention contexts after submission, but preserve current_workflow if not disabled
+      setSelectedContexts((prev) => {
+        // Keep current_workflow context if it's not disabled
+        const currentWorkflowCtx = prev.find(
+          (ctx) => ctx.kind === 'current_workflow' && !workflowAutoAddDisabled
+        )
+        return currentWorkflowCtx ? [currentWorkflowCtx] : []
+      })
+
+      // Mark that we just sent a message to prevent auto-add
+      setJustSentMessage(true)
+
       setOpenSubmenuFor(null)
       setShowMentionMenu(false)
     }
@@ -583,6 +760,9 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
         const aggregatedList =
           !openSubmenuFor && mainQ.length > 0
             ? [
+                ...workflowBlocks
+                  .filter((b) => (b.name || b.id).toLowerCase().includes(mainQ))
+                  .map((b) => ({ type: 'Workflow Blocks' as const, value: b })),
                 ...workflows
                   .filter((w) => (w.name || 'Untitled Workflow').toLowerCase().includes(mainQ))
                   .map((w) => ({ type: 'Workflows' as const, value: w })),
@@ -655,10 +835,36 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
             requestAnimationFrame(() => scrollActiveItemIntoView(next))
             return next
           })
+        } else if (openSubmenuFor === 'Workflow Blocks' && workflowBlocks.length > 0) {
+          const q = getSubmenuQuery().toLowerCase()
+          const filtered = workflowBlocks.filter((b) => (b.name || b.id).toLowerCase().includes(q))
+          setSubmenuActiveIndex((prev) => {
+            const last = Math.max(0, filtered.length - 1)
+            let next = prev
+            if (filtered.length === 0) next = 0
+            else if (e.key === 'ArrowDown') next = prev >= last ? 0 : prev + 1
+            else next = prev <= 0 ? last : prev - 1
+            requestAnimationFrame(() => scrollActiveItemIntoView(next))
+            return next
+          })
         } else if (openSubmenuFor === 'Templates' && templatesList.length > 0) {
           const q = getSubmenuQuery().toLowerCase()
           const filtered = templatesList.filter((t) =>
             (t.name || 'Untitled Template').toLowerCase().includes(q)
+          )
+          setSubmenuActiveIndex((prev) => {
+            const last = Math.max(0, filtered.length - 1)
+            let next = prev
+            if (filtered.length === 0) next = 0
+            else if (e.key === 'ArrowDown') next = prev >= last ? 0 : prev + 1
+            else next = prev <= 0 ? last : prev - 1
+            requestAnimationFrame(() => scrollActiveItemIntoView(next))
+            return next
+          })
+        } else if (openSubmenuFor === 'Logs' && logsList.length > 0) {
+          const q = getSubmenuQuery().toLowerCase()
+          const filtered = logsList.filter((l) =>
+            [l.workflowName, l.trigger || ''].join(' ').toLowerCase().includes(q)
           )
           setSubmenuActiveIndex((prev) => {
             const last = Math.max(0, filtered.length - 1)
@@ -687,6 +893,9 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
             ...pastChats
               .filter((c) => (c.title || 'Untitled Chat').toLowerCase().includes(q))
               .map((c) => ({ type: 'Chats' as const, value: c })),
+            ...logsList
+              .filter((l) => (l.workflowName || 'Untitled Workflow').toLowerCase().includes(q))
+              .map((l) => ({ type: 'Logs' as const, value: l })),
           ]
           setInAggregated(true)
           setSubmenuActiveIndex((prev) => {
@@ -804,12 +1013,28 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
           setSubmenuActiveIndex(0)
           setSubmenuQueryStart(getCaretPos())
           void ensureBlocksLoaded()
+        } else if (selected === 'Workflow Blocks') {
+          resetActiveMentionQuery()
+          setOpenSubmenuFor('Workflow Blocks')
+          setSubmenuActiveIndex(0)
+          setSubmenuQueryStart(getCaretPos())
+          void ensureWorkflowBlocksLoaded()
+        } else if (selected === 'Docs') {
+          // No submenu; insert immediately
+          resetActiveMentionQuery()
+          insertDocsMention()
         } else if (selected === 'Templates') {
           resetActiveMentionQuery()
           setOpenSubmenuFor('Templates')
           setSubmenuActiveIndex(0)
           setSubmenuQueryStart(getCaretPos())
           void ensureTemplatesLoaded()
+        } else if (selected === 'Logs') {
+          resetActiveMentionQuery()
+          setOpenSubmenuFor('Logs')
+          setSubmenuActiveIndex(0)
+          setSubmenuQueryStart(getCaretPos())
+          void ensureLogsLoaded()
         }
         return
       }
@@ -924,22 +1149,28 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
           const selected = filteredMain[mentionActiveIndex]
           if (inAggregated) {
             const q = mainQ
-            const aggregated = [
+            const aggregated: Array<{ type: string; value: any }> = [
+              ...workflowBlocks
+                .filter((b) => (b.name || b.id).toLowerCase().includes(q))
+                .map((b) => ({ type: 'Workflow Blocks', value: b })),
               ...workflows
                 .filter((w) => (w.name || 'Untitled Workflow').toLowerCase().includes(q))
-                .map((w) => ({ type: 'Workflows' as const, value: w })),
+                .map((w) => ({ type: 'Workflows', value: w })),
               ...blocksList
                 .filter((b) => (b.name || b.id).toLowerCase().includes(q))
-                .map((b) => ({ type: 'Blocks' as const, value: b })),
+                .map((b) => ({ type: 'Blocks', value: b })),
               ...knowledgeBases
                 .filter((k) => (k.name || 'Untitled').toLowerCase().includes(q))
-                .map((k) => ({ type: 'Knowledge' as const, value: k })),
+                .map((k) => ({ type: 'Knowledge', value: k })),
               ...templatesList
                 .filter((t) => (t.name || 'Untitled Template').toLowerCase().includes(q))
-                .map((t) => ({ type: 'Templates' as const, value: t })),
+                .map((t) => ({ type: 'Templates', value: t })),
               ...pastChats
                 .filter((c) => (c.title || 'Untitled Chat').toLowerCase().includes(q))
-                .map((c) => ({ type: 'Chats' as const, value: c })),
+                .map((c) => ({ type: 'Chats', value: c })),
+              ...logsList
+                .filter((l) => (l.workflowName || 'Untitled Workflow').toLowerCase().includes(q))
+                .map((l) => ({ type: 'Logs', value: l })),
             ]
             const idx = Math.max(0, Math.min(submenuActiveIndex, aggregated.length - 1))
             const chosen = aggregated[idx]
@@ -947,8 +1178,11 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
               if (chosen.type === 'Chats') insertPastChatMention(chosen.value as any)
               else if (chosen.type === 'Workflows') insertWorkflowMention(chosen.value as any)
               else if (chosen.type === 'Knowledge') insertKnowledgeMention(chosen.value as any)
+              else if (chosen.type === 'Workflow Blocks')
+                insertWorkflowBlockMention(chosen.value as any)
               else if (chosen.type === 'Blocks') insertBlockMention(chosen.value as any)
               else if (chosen.type === 'Templates') insertTemplateMention(chosen.value as any)
+              else if (chosen.type === 'Logs') insertLogMention(chosen.value as any)
             }
           } else if (!openSubmenuFor && selected === 'Chats') {
             resetActiveMentionQuery()
@@ -1016,12 +1250,38 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
               insertBlockMention(chosen)
               setSubmenuQueryStart(null)
             }
+          } else if (!openSubmenuFor && selected === 'Workflow Blocks') {
+            resetActiveMentionQuery()
+            setOpenSubmenuFor('Workflow Blocks')
+            setSubmenuActiveIndex(0)
+            setSubmenuQueryStart(getCaretPos())
+            void ensureWorkflowBlocksLoaded()
+          } else if (openSubmenuFor === 'Workflow Blocks') {
+            const q = getSubmenuQuery().toLowerCase()
+            const filtered = workflowBlocks.filter((b) =>
+              (b.name || b.id).toLowerCase().includes(q)
+            )
+            if (filtered.length > 0) {
+              const chosen =
+                filtered[Math.max(0, Math.min(submenuActiveIndex, filtered.length - 1))]
+              insertWorkflowBlockMention(chosen)
+              setSubmenuQueryStart(null)
+            }
+          } else if (!openSubmenuFor && selected === 'Docs') {
+            resetActiveMentionQuery()
+            insertDocsMention()
           } else if (!openSubmenuFor && selected === 'Templates') {
             resetActiveMentionQuery()
             setOpenSubmenuFor('Templates')
             setSubmenuActiveIndex(0)
             setSubmenuQueryStart(getCaretPos())
             void ensureTemplatesLoaded()
+          } else if (!openSubmenuFor && selected === 'Logs') {
+            resetActiveMentionQuery()
+            setOpenSubmenuFor('Logs')
+            setSubmenuActiveIndex(0)
+            setSubmenuQueryStart(getCaretPos())
+            void ensureLogsLoaded()
           } else if (openSubmenuFor === 'Templates') {
             const q = getSubmenuQuery().toLowerCase()
             const filtered = templatesList.filter((t) =>
@@ -1033,24 +1293,41 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
               insertTemplateMention(chosen)
               setSubmenuQueryStart(null)
             }
+          } else if (openSubmenuFor === 'Logs' && logsList.length > 0) {
+            const q = getSubmenuQuery().toLowerCase()
+            const filtered = logsList.filter((l) =>
+              [l.workflowName, l.trigger || ''].join(' ').toLowerCase().includes(q)
+            )
+            if (filtered.length > 0) {
+              const chosen =
+                filtered[Math.max(0, Math.min(submenuActiveIndex, filtered.length - 1))]
+              insertLogMention(chosen)
+              setSubmenuQueryStart(null)
+            }
           } else if (isAggregate || inAggregated) {
             const q = mainQ
-            const aggregated = [
+            const aggregated: Array<{ type: string; value: any }> = [
+              ...workflowBlocks
+                .filter((b) => (b.name || b.id).toLowerCase().includes(q))
+                .map((b) => ({ type: 'Workflow Blocks', value: b })),
               ...workflows
                 .filter((w) => (w.name || 'Untitled Workflow').toLowerCase().includes(q))
-                .map((w) => ({ type: 'Workflows' as const, value: w })),
+                .map((w) => ({ type: 'Workflows', value: w })),
               ...blocksList
                 .filter((b) => (b.name || b.id).toLowerCase().includes(q))
-                .map((b) => ({ type: 'Blocks' as const, value: b })),
+                .map((b) => ({ type: 'Blocks', value: b })),
               ...knowledgeBases
                 .filter((k) => (k.name || 'Untitled').toLowerCase().includes(q))
-                .map((k) => ({ type: 'Knowledge' as const, value: k })),
+                .map((k) => ({ type: 'Knowledge', value: k })),
               ...templatesList
                 .filter((t) => (t.name || 'Untitled Template').toLowerCase().includes(q))
-                .map((t) => ({ type: 'Templates' as const, value: t })),
+                .map((t) => ({ type: 'Templates', value: t })),
               ...pastChats
                 .filter((c) => (c.title || 'Untitled Chat').toLowerCase().includes(q))
-                .map((c) => ({ type: 'Chats' as const, value: c })),
+                .map((c) => ({ type: 'Chats', value: c })),
+              ...logsList
+                .filter((l) => (l.workflowName || 'Untitled Workflow').toLowerCase().includes(q))
+                .map((l) => ({ type: 'Logs', value: l })),
             ]
             const idx = Math.max(0, Math.min(submenuActiveIndex, aggregated.length - 1))
             const chosen = aggregated[idx]
@@ -1058,8 +1335,10 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
               if (chosen.type === 'Chats') insertPastChatMention(chosen.value)
               else if (chosen.type === 'Workflows') insertWorkflowMention(chosen.value)
               else if (chosen.type === 'Knowledge') insertKnowledgeMention(chosen.value)
+              else if (chosen.type === 'Workflow Blocks') insertWorkflowBlockMention(chosen.value)
               else if (chosen.type === 'Blocks') insertBlockMention(chosen.value)
               else if (chosen.type === 'Templates') insertTemplateMention(chosen.value)
+              else if (chosen.type === 'Logs') insertLogMention(chosen.value)
             }
           }
         }
@@ -1133,6 +1412,12 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
       } else {
         setInternalMessage(newValue)
       }
+
+      // Reset the "just sent" flag when user starts typing
+      if (justSentMessage && newValue.length > 0) {
+        setJustSentMessage(false)
+      }
+
       const caret = e.target.selectionStart ?? newValue.length
       const active = getActiveMentionQueryAtPosition(caret, newValue)
       if (active) {
@@ -1200,12 +1485,13 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
       if (!active) return false
       const before = message.slice(0, active.start)
       const after = message.slice(active.end)
-      const next = `${before}@${label} ${after}`
+      const insertion = `@${label} `
+      const next = `${before}${insertion}${after}`.replace(/\s{2,}/g, ' ')
       if (controlledValue !== undefined) onControlledChange?.(next)
       else setInternalMessage(next)
       requestAnimationFrame(() => {
-        const caretPos = `${before}@${label} `.length
-        textarea.setSelectionRange(caretPos, caretPos)
+        const cursorPos = before.length + insertion.length
+        textarea.setSelectionRange(cursorPos, cursorPos)
         textarea.focus()
       })
       return true
@@ -1213,8 +1499,7 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
 
     const insertPastChatMention = (chat: { id: string; title: string | null }) => {
       const label = chat.title || 'Untitled Chat'
-      const token = `@${label}`
-      if (!replaceActiveMentionWith(label)) insertAtCursor(`${token} `)
+      replaceActiveMentionWith(label)
       setSelectedContexts((prev) => {
         // Avoid duplicate contexts for same chat
         if (prev.some((c) => c.kind === 'past_chat' && (c as any).chatId === chat.id)) return prev
@@ -1238,8 +1523,7 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
 
     const insertKnowledgeMention = (kb: { id: string; name: string }) => {
       const label = kb.name || 'Untitled'
-      const token = `@${label}`
-      if (!replaceActiveMentionWith(label)) insertAtCursor(`${token} `)
+      replaceActiveMentionWith(label)
       setSelectedContexts((prev) => {
         if (prev.some((c) => c.kind === 'knowledge' && (c as any).knowledgeId === kb.id))
           return prev
@@ -1251,8 +1535,7 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
 
     const insertBlockMention = (blk: { id: string; name: string }) => {
       const label = blk.name || blk.id
-      const token = `@${label}`
-      if (!replaceActiveMentionWith(label)) insertAtCursor(`${token} `)
+      replaceActiveMentionWith(label)
       setSelectedContexts((prev) => {
         if (prev.some((c) => c.kind === 'blocks' && (c as any).blockId === blk.id)) return prev
         return [...prev, { kind: 'blocks', blockId: blk.id, label } as any]
@@ -1263,12 +1546,22 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
 
     const insertTemplateMention = (tpl: { id: string; name: string }) => {
       const label = tpl.name || 'Untitled Template'
-      const token = `@${label}`
-      if (!replaceActiveMentionWith(label)) insertAtCursor(`${token} `)
+      replaceActiveMentionWith(label)
       setSelectedContexts((prev) => {
         if (prev.some((c) => c.kind === 'templates' && (c as any).templateId === tpl.id))
           return prev
         return [...prev, { kind: 'templates', templateId: tpl.id, label } as any]
+      })
+      setShowMentionMenu(false)
+      setOpenSubmenuFor(null)
+    }
+
+    const insertDocsMention = () => {
+      const label = 'Docs'
+      if (!replaceActiveMentionWith(label)) insertAtCursor(`@${label} `)
+      setSelectedContexts((prev) => {
+        if (prev.some((c) => c.kind === 'docs')) return prev
+        return [...prev, { kind: 'docs', label } as any]
       })
       setShowMentionMenu(false)
       setOpenSubmenuFor(null)
@@ -1391,17 +1684,37 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
       })
     }
 
-    // Keep selected contexts in sync with the text so replacing selections works gracefully
+    // Keep selected contexts in sync with inline @label tokens so deleting inline tokens updates pills
     useEffect(() => {
       if (!message) {
-        if (selectedContexts.length > 0) setSelectedContexts([])
+        // When message is empty, preserve current_workflow if not disabled
+        // Clear other contexts
+        setSelectedContexts((prev) => {
+          const currentWorkflowCtx = prev.find(
+            (ctx) => ctx.kind === 'current_workflow' && !workflowAutoAddDisabled
+          )
+          return currentWorkflowCtx ? [currentWorkflowCtx] : []
+        })
         return
       }
       const presentLabels = new Set<string>()
       const ranges = computeMentionRanges()
       for (const r of ranges) presentLabels.add(r.label)
-      setSelectedContexts((prev) => prev.filter((c) => !!c.label && presentLabels.has(c.label!)))
-    }, [message])
+      setSelectedContexts((prev) => {
+        // Keep contexts that are mentioned in text OR are current_workflow (unless disabled)
+        const filteredContexts = prev.filter((c) => {
+          // Always preserve current_workflow context if it's not disabled
+          // It should only be removable via the X button
+          if (c.kind === 'current_workflow' && !workflowAutoAddDisabled) {
+            return true
+          }
+          // For other contexts, check if they're mentioned in text
+          return !!c.label && presentLabels.has(c.label!)
+        })
+
+        return filteredContexts
+      })
+    }, [message, workflowAutoAddDisabled])
 
     // Manage aggregate mode and preloading when needed
     useEffect(() => {
@@ -1418,9 +1731,11 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
       if (q.length > 0) {
         void ensurePastChatsLoaded()
         void ensureWorkflowsLoaded()
+        void ensureWorkflowBlocksLoaded()
         void ensureKnowledgeLoaded()
         void ensureBlocksLoaded()
         void ensureTemplatesLoaded()
+        void ensureLogsLoaded()
       }
       if (needAggregate) {
         setSubmenuActiveIndex(0)
@@ -1461,55 +1776,47 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
       return 'Agent'
     }
 
-    // Depth toggle state comes from global store; access via useCopilotStore
-    const { agentDepth, agentPrefetch, setAgentDepth, setAgentPrefetch } = useCopilotStore()
+    // Model selection state comes from global store; access via useCopilotStore
+    const { selectedModel, agentPrefetch, setSelectedModel, setAgentPrefetch } = useCopilotStore()
 
-    // Ensure MAX mode is off for Fast and Balanced depths
-    useEffect(() => {
-      if (agentDepth < 2 && !agentPrefetch) {
-        setAgentPrefetch(true)
-      }
-    }, [agentDepth, agentPrefetch, setAgentPrefetch])
-
-    const cycleDepth = () => {
-      // 8 modes: depths 0-3, each with prefetch off/on. Cycle depth, then toggle prefetch when wrapping.
-      const nextDepth = agentDepth === 3 ? 0 : ((agentDepth + 1) as 0 | 1 | 2 | 3)
-      if (nextDepth === 0 && agentDepth === 3) {
-        setAgentPrefetch(!agentPrefetch)
-      }
-      setAgentDepth(nextDepth)
-    }
+    // Model configurations with their display names
+    const modelOptions = [
+      { value: 'gpt-5-fast', label: 'gpt-5-fast' },
+      { value: 'gpt-5', label: 'gpt-5' },
+      { value: 'gpt-5-medium', label: 'gpt-5-medium' },
+      { value: 'gpt-5-high', label: 'gpt-5-high' },
+      { value: 'gpt-4o', label: 'gpt-4o' },
+      { value: 'gpt-4.1', label: 'gpt-4.1' },
+      { value: 'o3', label: 'o3' },
+      { value: 'claude-4-sonnet', label: 'claude-4-sonnet' },
+      { value: 'claude-4.5-sonnet', label: 'claude-4.5-sonnet' },
+      { value: 'claude-4.1-opus', label: 'claude-4.1-opus' },
+    ] as const
 
     const getCollapsedModeLabel = () => {
-      const base = getDepthLabelFor(agentDepth)
-      return !agentPrefetch ? `${base} MAX` : base
+      const model = modelOptions.find((m) => m.value === selectedModel)
+      return model ? model.label : 'Claude 4.5 Sonnet'
     }
 
-    const getDepthLabelFor = (value: 0 | 1 | 2 | 3) => {
-      return value === 0 ? 'Fast' : value === 1 ? 'Balanced' : value === 2 ? 'Advanced' : 'Behemoth'
-    }
-
-    // Removed descriptive suffixes; concise labels only
-    const getDepthDescription = (value: 0 | 1 | 2 | 3) => {
-      if (value === 0)
-        return 'Fastest and cheapest. Good for small edits, simple workflows, and small tasks'
-      if (value === 1) return 'Balances speed and reasoning. Good fit for most tasks'
-      if (value === 2)
-        return 'More reasoning for larger workflows and complex edits, still balanced for speed'
-      return 'Maximum reasoning power. Best for complex workflow building and debugging'
-    }
-
-    const getDepthIconFor = (value: 0 | 1 | 2 | 3) => {
+    const getModelIcon = () => {
       const colorClass = !agentPrefetch
         ? 'text-[var(--brand-primary-hover-hex)]'
         : 'text-muted-foreground'
-      if (value === 0) return <Zap className={`h-3 w-3 ${colorClass}`} />
-      if (value === 1) return <InfinityIcon className={`h-3 w-3 ${colorClass}`} />
-      if (value === 2) return <Brain className={`h-3 w-3 ${colorClass}`} />
-      return <BrainCircuit className={`h-3 w-3 ${colorClass}`} />
-    }
 
-    const getDepthIcon = () => getDepthIconFor(agentDepth)
+      // Match the dropdown icon logic exactly
+      if (['gpt-5-high', 'o3', 'claude-4.1-opus'].includes(selectedModel)) {
+        return <BrainCircuit className={`h-3 w-3 ${colorClass}`} />
+      }
+      if (
+        ['gpt-5', 'gpt-5-medium', 'claude-4-sonnet', 'claude-4.5-sonnet'].includes(selectedModel)
+      ) {
+        return <Brain className={`h-3 w-3 ${colorClass}`} />
+      }
+      if (['gpt-4o', 'gpt-4.1', 'gpt-5-fast'].includes(selectedModel)) {
+        return <Zap className={`h-3 w-3 ${colorClass}`} />
+      }
+      return <InfinityIcon className={`h-3 w-3 ${colorClass}`} />
+    }
 
     const scrollActiveItemIntoView = (index: number) => {
       const container = menuListRef.current
@@ -1546,6 +1853,157 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
       setMentionActiveIndex(0)
       setSubmenuActiveIndex(0)
       requestAnimationFrame(() => scrollActiveItemIntoView(0))
+    }
+
+    // Load recent logs (executions)
+    const ensureLogsLoaded = async () => {
+      if (isLoadingLogs || logsList.length > 0) return
+      try {
+        setIsLoadingLogs(true)
+        const resp = await fetch(`/api/logs?workspaceId=${workspaceId}&limit=50&details=full`)
+        if (!resp.ok) throw new Error(`Failed to load logs: ${resp.status}`)
+        const data = await resp.json()
+        const items = Array.isArray(data?.data) ? data.data : []
+        const mapped = items.map((l: any) => ({
+          id: l.id,
+          executionId: l.executionId || l.id,
+          level: l.level,
+          trigger: l.trigger || null,
+          createdAt: l.createdAt,
+          workflowName:
+            (l.workflow && (l.workflow.name || l.workflow.title)) ||
+            l.workflowName ||
+            'Untitled Workflow',
+        }))
+        setLogsList(mapped)
+      } catch {
+      } finally {
+        setIsLoadingLogs(false)
+      }
+    }
+
+    // Insert a logs mention
+    const insertLogMention = (log: {
+      id: string
+      executionId?: string
+      level: string
+      trigger: string | null
+      createdAt: string
+      workflowName: string
+    }) => {
+      const label = log.workflowName
+      replaceActiveMentionWith(label)
+      setSelectedContexts((prev) => {
+        if (prev.some((c) => c.kind === 'logs' && c.label === label)) return prev
+        return [...prev, { kind: 'logs', executionId: log.executionId, label }]
+      })
+      setShowMentionMenu(false)
+      setOpenSubmenuFor(null)
+    }
+
+    // Helper to format timestamps
+    const formatTimestamp = (iso: string) => {
+      try {
+        const d = new Date(iso)
+        const mm = String(d.getMonth() + 1).padStart(2, '0')
+        const dd = String(d.getDate()).padStart(2, '0')
+        const hh = String(d.getHours()).padStart(2, '0')
+        const min = String(d.getMinutes()).padStart(2, '0')
+        return `${mm}-${dd} ${hh}:${min}`
+      } catch {
+        return iso
+      }
+    }
+
+    // Get workflow blocks from the workflow store
+    const workflowStoreBlocks = useWorkflowStore((state) => state.blocks)
+
+    // Transform workflow store blocks into the format needed for the mention menu
+    const [workflowBlocks, setWorkflowBlocks] = useState<
+      Array<{ id: string; name: string; type: string; iconComponent?: any; bgColor?: string }>
+    >([])
+    const [isLoadingWorkflowBlocks, setIsLoadingWorkflowBlocks] = useState(false)
+
+    // Sync workflow blocks from store whenever they change
+    useEffect(() => {
+      const syncWorkflowBlocks = async () => {
+        if (!workflowId || !workflowStoreBlocks || Object.keys(workflowStoreBlocks).length === 0) {
+          setWorkflowBlocks([])
+          logger.debug('No workflow blocks to sync', {
+            workflowId,
+            hasBlocks: !!workflowStoreBlocks,
+            blockCount: Object.keys(workflowStoreBlocks || {}).length,
+          })
+          return
+        }
+
+        try {
+          // Map to display with block registry icons/colors
+          const { registry: blockRegistry } = await import('@/blocks/registry')
+          const mapped = Object.values(workflowStoreBlocks).map((b: any) => {
+            const reg = (blockRegistry as any)[b.type]
+            return {
+              id: b.id,
+              name: b.name || b.id,
+              type: b.type,
+              iconComponent: reg?.icon,
+              bgColor: reg?.bgColor || '#6B7280',
+            }
+          })
+          setWorkflowBlocks(mapped)
+          logger.debug('Synced workflow blocks for mention menu', {
+            count: mapped.length,
+            blocks: mapped.map((b) => b.name),
+          })
+        } catch (error) {
+          logger.debug('Failed to sync workflow blocks:', error)
+        }
+      }
+
+      syncWorkflowBlocks()
+    }, [workflowStoreBlocks, workflowId])
+
+    const ensureWorkflowBlocksLoaded = async () => {
+      // Since blocks are now synced from store via useEffect, this can be a no-op
+      // or just ensure the blocks are loaded in the store
+      if (!workflowId) return
+
+      // Debug: Log current state
+      logger.debug('ensureWorkflowBlocksLoaded called', {
+        workflowId,
+        storeBlocksCount: Object.keys(workflowStoreBlocks || {}).length,
+        workflowBlocksCount: workflowBlocks.length,
+      })
+
+      // Blocks will be automatically synced from the store
+    }
+
+    const insertWorkflowBlockMention = (blk: { id: string; name: string }) => {
+      const label = `${blk.name}`
+      const token = `@${label}`
+      if (!replaceActiveMentionWith(label)) insertAtCursor(`${token} `)
+      setSelectedContexts((prev) => {
+        if (
+          prev.some(
+            (c) =>
+              c.kind === 'workflow_block' &&
+              (c as any).workflowId === workflowId &&
+              (c as any).blockId === blk.id
+          )
+        )
+          return prev
+        return [
+          ...prev,
+          {
+            kind: 'workflow_block',
+            workflowId: workflowId as string,
+            blockId: blk.id,
+            label,
+          } as any,
+        ]
+      })
+      setShowMentionMenu(false)
+      setOpenSubmenuFor(null)
     }
 
     return (
@@ -1621,11 +2079,62 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
             </div>
           )}
 
-          {/* Textarea Field */}
+          {/* Selected Context Pills */}
+          {selectedContexts.filter((c) => c.kind !== 'current_workflow').length > 0 && (
+            <div className='mb-2 flex flex-wrap gap-1.5'>
+              {selectedContexts
+                .filter((c) => c.kind !== 'current_workflow')
+                .map((ctx, idx) => (
+                  <span
+                    key={`selctx-${idx}-${ctx.label}`}
+                    className='inline-flex items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--brand-primary-hover-hex)_14%,transparent)] px-1.5 py-0.5 text-[11px] text-foreground'
+                    title={ctx.label}
+                  >
+                    {ctx.kind === 'past_chat' ? (
+                      <Bot className='h-3 w-3 text-muted-foreground' />
+                    ) : ctx.kind === 'workflow' ? (
+                      <Workflow className='h-3 w-3 text-muted-foreground' />
+                    ) : ctx.kind === 'blocks' ? (
+                      <Blocks className='h-3 w-3 text-muted-foreground' />
+                    ) : ctx.kind === 'workflow_block' ? (
+                      <Box className='h-3 w-3 text-muted-foreground' />
+                    ) : ctx.kind === 'knowledge' ? (
+                      <LibraryBig className='h-3 w-3 text-muted-foreground' />
+                    ) : ctx.kind === 'templates' ? (
+                      <Shapes className='h-3 w-3 text-muted-foreground' />
+                    ) : ctx.kind === 'docs' ? (
+                      <BookOpen className='h-3 w-3 text-muted-foreground' />
+                    ) : ctx.kind === 'logs' ? (
+                      <SquareChevronRight className='h-3 w-3 text-muted-foreground' />
+                    ) : (
+                      <Info className='h-3 w-3 text-muted-foreground' />
+                    )}
+                    <span className='max-w-[140px] truncate'>{ctx.label}</span>
+                    <button
+                      type='button'
+                      onClick={() => {
+                        // Remove only non-hidden contexts; current_workflow is never shown
+                        setSelectedContexts((prev) => prev.filter((c) => c.label !== ctx.label))
+                      }}
+                      className='text-muted-foreground transition-colors hover:text-foreground'
+                      title='Remove context'
+                      aria-label='Remove context'
+                    >
+                      <X className='h-3 w-3' />
+                    </button>
+                  </span>
+                ))}
+            </div>
+          )}
+
+          {/* Textarea Field with overlay */}
           <div className='relative'>
             {/* Highlight overlay */}
-            <div className='pointer-events-none absolute inset-0 z-[1] px-[2px] py-1'>
-              <pre className='whitespace-pre-wrap font-sans text-foreground text-sm leading-[1.25rem]'>
+            <div
+              ref={overlayRef}
+              className='pointer-events-none absolute inset-0 z-[1] max-h-[120px] overflow-y-auto overflow-x-hidden px-[2px] py-1 [&::-webkit-scrollbar]:hidden'
+            >
+              <pre className='whitespace-pre-wrap break-words font-sans text-foreground text-sm leading-[1.25rem]'>
                 {(() => {
                   const elements: React.ReactNode[] = []
                   const remaining = message
@@ -1634,7 +2143,7 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
                   // Build regex for all labels
                   const labels = contexts.map((c) => c.label).filter(Boolean)
                   const pattern = new RegExp(
-                    `@(${labels.map((l) => l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`,
+                    `@(${labels.map((l) => l.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')).join('|')})`,
                     'g'
                   )
                   let lastIndex = 0
@@ -1644,6 +2153,7 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
                     const before = remaining.slice(lastIndex, i)
                     if (before) elements.push(before)
                     const mentionText = match[0]
+                    const mentionLabel = match[1]
                     elements.push(
                       <span
                         key={`${mentionText}-${i}-${lastIndex}`}
@@ -1670,9 +2180,10 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
               placeholder={isDragging ? 'Drop files here...' : effectivePlaceholder}
               disabled={disabled}
               rows={1}
-              className='relative z-[2] mb-2 min-h-[32px] w-full resize-none overflow-y-auto overflow-x-hidden border-0 bg-transparent px-[2px] py-1 font-sans text-sm text-transparent leading-[1.25rem] caret-foreground focus-visible:ring-0 focus-visible:ring-offset-0'
-              style={{ height: 'auto' }}
+              className='relative z-[2] mb-2 min-h-[32px] w-full resize-none overflow-y-auto overflow-x-hidden break-words border-0 bg-transparent px-[2px] py-1 font-sans text-sm text-transparent leading-[1.25rem] caret-foreground focus-visible:ring-0 focus-visible:ring-offset-0'
+              style={{ height: 'auto', wordBreak: 'break-word' }}
             />
+
             {showMentionMenu && (
               <>
                 <div
@@ -1681,7 +2192,9 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
                     'absolute bottom-full left-0 z-50 mb-1 flex max-h-64 flex-col overflow-hidden rounded-[8px] border bg-popover p-1 text-foreground shadow-md',
                     openSubmenuFor === 'Blocks'
                       ? 'w-80'
-                      : openSubmenuFor === 'Templates'
+                      : openSubmenuFor === 'Templates' ||
+                          openSubmenuFor === 'Logs' ||
+                          aggregatedActive
                         ? 'w-96'
                         : 'w-56'
                   )}
@@ -1692,12 +2205,16 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
                         {openSubmenuFor === 'Chats'
                           ? 'Chats'
                           : openSubmenuFor === 'Workflows'
-                            ? 'Workflows'
+                            ? 'All workflows'
                             : openSubmenuFor === 'Knowledge'
                               ? 'Knowledge Bases'
                               : openSubmenuFor === 'Blocks'
                                 ? 'Blocks'
-                                : 'Templates'}
+                                : openSubmenuFor === 'Workflow Blocks'
+                                  ? 'Workflow Blocks'
+                                  : openSubmenuFor === 'Templates'
+                                    ? 'Templates'
+                                    : 'Logs'}
                       </div>
                       <div ref={menuListRef} className='flex-1 overflow-auto overscroll-contain'>
                         {isSubmenu('Chats') && (
@@ -1879,6 +2396,53 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
                             )}
                           </>
                         )}
+                        {isSubmenu('Workflow Blocks') && (
+                          <>
+                            {isLoadingWorkflowBlocks ? (
+                              <div className='px-2 py-2 text-muted-foreground text-sm'>
+                                Loading...
+                              </div>
+                            ) : workflowBlocks.length === 0 ? (
+                              <div className='px-2 py-2 text-muted-foreground text-sm'>
+                                No blocks in this workflow
+                              </div>
+                            ) : (
+                              workflowBlocks
+                                .filter((b) =>
+                                  (b.name || b.id)
+                                    .toLowerCase()
+                                    .includes(getSubmenuQuery().toLowerCase())
+                                )
+                                .map((blk, idx) => (
+                                  <div
+                                    key={blk.id}
+                                    data-idx={idx}
+                                    className={cn(
+                                      'flex items-center gap-2 rounded-[6px] px-2 py-1.5 text-sm hover:bg-muted/60',
+                                      submenuActiveIndex === idx && 'bg-muted'
+                                    )}
+                                    role='menuitem'
+                                    aria-selected={submenuActiveIndex === idx}
+                                    onMouseEnter={() => setSubmenuActiveIndex(idx)}
+                                    onClick={() => {
+                                      insertWorkflowBlockMention(blk)
+                                      setSubmenuQueryStart(null)
+                                    }}
+                                  >
+                                    <div
+                                      className='relative flex h-4 w-4 items-center justify-center rounded-[3px]'
+                                      style={{ backgroundColor: blk.bgColor || '#6B7280' }}
+                                    >
+                                      {blk.iconComponent && (
+                                        <blk.iconComponent className='!h-3 !w-3 text-white' />
+                                      )}
+                                    </div>
+                                    <span className='truncate'>{blk.name || blk.id}</span>
+                                  </div>
+                                ))
+                            )}
+                          </>
+                        )}
                         {isSubmenu('Templates') && (
                           <>
                             {isLoadingTemplates ? (
@@ -1924,6 +2488,59 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
                             )}
                           </>
                         )}
+                        {isSubmenu('Logs') && (
+                          <>
+                            {isLoadingLogs ? (
+                              <div className='px-2 py-2 text-muted-foreground text-sm'>
+                                Loading...
+                              </div>
+                            ) : logsList.length === 0 ? (
+                              <div className='px-2 py-2 text-muted-foreground text-sm'>
+                                No executions found
+                              </div>
+                            ) : (
+                              logsList
+                                .filter((l) =>
+                                  [l.workflowName, l.trigger || '']
+                                    .join(' ')
+                                    .toLowerCase()
+                                    .includes(getSubmenuQuery().toLowerCase())
+                                )
+                                .map((log, idx) => (
+                                  <div
+                                    key={log.id}
+                                    data-idx={idx}
+                                    className={cn(
+                                      'flex items-center gap-2 rounded-[6px] px-2 py-1.5 text-sm hover:bg-muted/60',
+                                      submenuActiveIndex === idx && 'bg-muted'
+                                    )}
+                                    role='menuitem'
+                                    aria-selected={submenuActiveIndex === idx}
+                                    onMouseEnter={() => setSubmenuActiveIndex(idx)}
+                                    onClick={() => {
+                                      insertLogMention(log)
+                                      setSubmenuQueryStart(null)
+                                    }}
+                                  >
+                                    {log.level === 'error' ? (
+                                      <X className='h-4 w-4 text-red-500' />
+                                    ) : (
+                                      <Check className='h-4 w-4 text-green-500' />
+                                    )}
+                                    <span className='min-w-0 truncate'>{log.workflowName}</span>
+                                    <span className='text-muted-foreground'>·</span>
+                                    <span className='whitespace-nowrap'>
+                                      {formatTimestamp(log.createdAt)}
+                                    </span>
+                                    <span className='text-muted-foreground'>·</span>
+                                    <span className='capitalize'>
+                                      {(log.trigger || 'manual').toLowerCase()}
+                                    </span>
+                                  </div>
+                                ))
+                            )}
+                          </>
+                        )}
                       </div>
                     </>
                   ) : (
@@ -1938,6 +2555,14 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
                         if (q.length > 0 && filtered.length === 0) {
                           // Aggregated search view
                           const aggregated = [
+                            ...workflowBlocks
+                              .filter((b) => (b.name || b.id).toLowerCase().includes(q))
+                              .map((b) => ({
+                                type: 'Workflow Blocks' as const,
+                                id: b.id,
+                                value: b,
+                                onClick: () => insertWorkflowBlockMention(b),
+                              })),
                             ...workflows
                               .filter((w) =>
                                 (w.name || 'Untitled Workflow').toLowerCase().includes(q)
@@ -1981,6 +2606,16 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
                                 id: c.id,
                                 value: c,
                                 onClick: () => insertPastChatMention(c),
+                              })),
+                            ...logsList
+                              .filter((l) =>
+                                (l.workflowName || 'Untitled Workflow').toLowerCase().includes(q)
+                              )
+                              .map((l) => ({
+                                type: 'Logs' as const,
+                                id: l.id,
+                                value: l,
+                                onClick: () => insertLogMention(l),
                               })),
                           ]
                           return (
@@ -2057,6 +2692,50 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
                                           {(item.value as any).name || (item.value as any).id}
                                         </span>
                                       </>
+                                    ) : item.type === 'Workflow Blocks' ? (
+                                      <>
+                                        <div
+                                          className='relative flex h-4 w-4 items-center justify-center rounded-[3px]'
+                                          style={{
+                                            backgroundColor:
+                                              (item.value as any).bgColor || '#6B7280',
+                                          }}
+                                        >
+                                          {(() => {
+                                            const Icon = (item.value as any).iconComponent
+                                            return Icon ? (
+                                              <Icon className='!h-3 !w-3 text-white' />
+                                            ) : null
+                                          })()}
+                                        </div>
+                                        <span className='truncate'>
+                                          {(item.value as any).name || (item.value as any).id}
+                                        </span>
+                                      </>
+                                    ) : item.type === 'Logs' ? (
+                                      <>
+                                        {(() => {
+                                          const v = item.value as any
+                                          return v.level === 'error' ? (
+                                            <X className='h-3.5 w-3.5 text-red-500' />
+                                          ) : (
+                                            <Check className='h-3.5 w-3.5 text-green-500' />
+                                          )
+                                        })()}
+                                        <span className='min-w-0 truncate'>
+                                          {(item.value as any).workflowName}
+                                        </span>
+                                        <span className='text-muted-foreground'>·</span>
+                                        <span className='whitespace-nowrap'>
+                                          {formatTimestamp((item.value as any).createdAt)}
+                                        </span>
+                                        <span className='text-muted-foreground'>·</span>
+                                        <span className='capitalize'>
+                                          {(
+                                            ((item.value as any).trigger as string) || 'manual'
+                                          ).toLowerCase()}
+                                        </span>
+                                      </>
                                     ) : (
                                       <>
                                         <div className='flex h-4 w-4 items-center justify-center'>
@@ -2123,12 +2802,27 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
                                     setSubmenuActiveIndex(0)
                                     setSubmenuQueryStart(getCaretPos())
                                     void ensureBlocksLoaded()
+                                  } else if (label === 'Workflow Blocks') {
+                                    resetActiveMentionQuery()
+                                    setOpenSubmenuFor('Workflow Blocks')
+                                    setSubmenuActiveIndex(0)
+                                    setSubmenuQueryStart(getCaretPos())
+                                    void ensureWorkflowBlocksLoaded()
+                                  } else if (label === 'Docs') {
+                                    // No submenu; insert immediately
+                                    insertDocsMention()
                                   } else if (label === 'Templates') {
                                     resetActiveMentionQuery()
                                     setOpenSubmenuFor('Templates')
                                     setSubmenuActiveIndex(0)
                                     setSubmenuQueryStart(getCaretPos())
                                     void ensureTemplatesLoaded()
+                                  } else if (label === 'Logs') {
+                                    resetActiveMentionQuery()
+                                    setOpenSubmenuFor('Logs')
+                                    setSubmenuActiveIndex(0)
+                                    setSubmenuQueryStart(getCaretPos())
+                                    void ensureLogsLoaded()
                                   }
                                 }}
                               >
@@ -2139,22 +2833,38 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
                                     <Workflow className='h-3.5 w-3.5 text-muted-foreground' />
                                   ) : label === 'Blocks' ? (
                                     <Blocks className='h-3.5 w-3.5 text-muted-foreground' />
+                                  ) : label === 'Workflow Blocks' ? (
+                                    <Box className='h-3.5 w-3.5 text-muted-foreground' />
                                   ) : label === 'Knowledge' ? (
                                     <LibraryBig className='h-3.5 w-3.5 text-muted-foreground' />
+                                  ) : label === 'Docs' ? (
+                                    <BookOpen className='h-3.5 w-3.5 text-muted-foreground' />
                                   ) : label === 'Templates' ? (
                                     <Shapes className='h-3.5 w-3.5 text-muted-foreground' />
+                                  ) : label === 'Logs' ? (
+                                    <SquareChevronRight className='h-3.5 w-3.5 text-muted-foreground' />
                                   ) : (
                                     <div className='h-3.5 w-3.5' />
                                   )}
-                                  <span>{label}</span>
+                                  <span>{label === 'Workflows' ? 'All workflows' : label}</span>
                                 </div>
-                                <ChevronRight className='h-3.5 w-3.5 text-muted-foreground' />
+                                {label !== 'Docs' && (
+                                  <ChevronRight className='h-3.5 w-3.5 text-muted-foreground' />
+                                )}
                               </div>
                             ))}
 
                             {(() => {
-                              const aq = q
+                              const aq = (
+                                getActiveMentionQueryAtPosition(getCaretPos())?.query || ''
+                              ).toLowerCase()
+                              const filteredLen = mentionOptions.filter((label) =>
+                                label.toLowerCase().includes(aq)
+                              ).length
                               const aggregated = [
+                                ...workflowBlocks
+                                  .filter((b) => (b.name || b.id).toLowerCase().includes(aq))
+                                  .map((b) => ({ type: 'Workflow Blocks' as const, value: b })),
                                 ...workflows
                                   .filter((w) =>
                                     (w.name || 'Untitled Workflow').toLowerCase().includes(aq)
@@ -2176,6 +2886,13 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
                                     (c.title || 'Untitled Chat').toLowerCase().includes(aq)
                                   )
                                   .map((c) => ({ type: 'Chats' as const, value: c })),
+                                ...logsList
+                                  .filter((l) =>
+                                    (l.workflowName || 'Untitled Workflow')
+                                      .toLowerCase()
+                                      .includes(aq)
+                                  )
+                                  .map((l) => ({ type: 'Logs' as const, value: l })),
                               ]
                               if (!aq || aq.length === 0 || aggregated.length === 0) return null
                               return (
@@ -2187,7 +2904,7 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
                                   {aggregated.map((item, idx) => (
                                     <div
                                       key={`${item.type}-${(item.value as any).id}`}
-                                      data-idx={filtered.length + idx}
+                                      data-idx={filteredLen + idx}
                                       className={cn(
                                         'flex cursor-default items-center gap-2 rounded-[6px] px-2 py-1.5 text-sm hover:bg-muted/60',
                                         inAggregated && submenuActiveIndex === idx && 'bg-muted'
@@ -2207,8 +2924,12 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
                                           insertKnowledgeMention(item.value as any)
                                         else if (item.type === 'Blocks')
                                           insertBlockMention(item.value as any)
+                                        else if ((item as any).type === 'Workflow Blocks')
+                                          insertWorkflowBlockMention(item.value as any)
                                         else if (item.type === 'Templates')
                                           insertTemplateMention(item.value as any)
+                                        else if (item.type === 'Logs')
+                                          insertLogMention(item.value as any)
                                       }}
                                     >
                                       {item.type === 'Chats' ? (
@@ -2263,6 +2984,50 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
                                             {(item.value as any).name || (item.value as any).id}
                                           </span>
                                         </>
+                                      ) : item.type === 'Workflow Blocks' ? (
+                                        <>
+                                          <div
+                                            className='relative flex h-4 w-4 items-center justify-center rounded-[3px]'
+                                            style={{
+                                              backgroundColor:
+                                                (item.value as any).bgColor || '#6B7280',
+                                            }}
+                                          >
+                                            {(() => {
+                                              const Icon = (item.value as any).iconComponent
+                                              return Icon ? (
+                                                <Icon className='!h-3 !w-3 text-white' />
+                                              ) : null
+                                            })()}
+                                          </div>
+                                          <span className='truncate'>
+                                            {(item.value as any).name || (item.value as any).id}
+                                          </span>
+                                        </>
+                                      ) : item.type === 'Logs' ? (
+                                        <>
+                                          {(() => {
+                                            const v = item.value as any
+                                            return v.level === 'error' ? (
+                                              <X className='h-3.5 w-3.5 text-red-500' />
+                                            ) : (
+                                              <Check className='h-3.5 w-3.5 text-green-500' />
+                                            )
+                                          })()}
+                                          <span className='min-w-0 truncate'>
+                                            {(item.value as any).workflowName}
+                                          </span>
+                                          <span className='text-muted-foreground'>·</span>
+                                          <span className='whitespace-nowrap'>
+                                            {formatTimestamp((item.value as any).createdAt)}
+                                          </span>
+                                          <span className='text-muted-foreground'>·</span>
+                                          <span className='capitalize'>
+                                            {(
+                                              ((item.value as any).trigger as string) || 'manual'
+                                            ).toLowerCase()}
+                                          </span>
+                                        </>
                                       ) : (
                                         <>
                                           <div className='flex h-4 w-4 items-center justify-center'>
@@ -2309,7 +3074,7 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
                     <span>{getModeText()}</span>
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align='start' className='p-0'>
+                <DropdownMenuContent align='start' side='top' className='p-0'>
                   <TooltipProvider>
                     <div className='w-[160px] p-1'>
                       <Tooltip>
@@ -2383,85 +3148,171 @@ const UserInput = forwardRef<UserInputRef, UserInputProps>(
                       )}
                       title='Choose mode'
                     >
-                      {getDepthIcon()}
-                      <span>{getCollapsedModeLabel()}</span>
+                      {getModelIcon()}
+                      <span>
+                        {getCollapsedModeLabel()}
+                        {!agentPrefetch &&
+                          !['gpt-4o', 'gpt-4.1', 'gpt-5-fast'].includes(selectedModel) && (
+                            <span className='ml-1 font-semibold'>MAX</span>
+                          )}
+                      </span>
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align='start' className='p-0'>
+                  <DropdownMenuContent align='start' side='top' className='max-h-[400px] p-0'>
                     <TooltipProvider delayDuration={100} skipDelayDuration={0}>
-                      <div className='w-[260px] p-3'>
-                        <div className='mb-3 flex items-center justify-between'>
-                          <div className='flex items-center gap-1.5'>
-                            <span className='font-medium text-xs'>MAX mode</span>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <button
-                                  type='button'
-                                  className='h-3.5 w-3.5 rounded text-muted-foreground transition-colors hover:text-foreground'
-                                  aria-label='MAX mode info'
-                                >
-                                  <Info className='h-3.5 w-3.5' />
-                                </button>
-                              </TooltipTrigger>
-                              <TooltipContent
-                                side='right'
-                                sideOffset={6}
-                                align='center'
-                                className='max-w-[220px] border bg-popover p-2 text-[11px] text-popover-foreground leading-snug shadow-md'
-                              >
-                                Significantly increases depth of reasoning
-                                <br />
-                                <span className='text-[10px] text-muted-foreground italic'>
-                                  Only available in Advanced and Behemoth modes
-                                </span>
-                              </TooltipContent>
-                            </Tooltip>
-                          </div>
-                          <Switch
-                            checked={!agentPrefetch}
-                            disabled={agentDepth < 2}
-                            title={
-                              agentDepth < 2
-                                ? 'MAX mode is only available for Advanced or Expert'
-                                : undefined
-                            }
-                            onCheckedChange={(checked) => {
-                              if (agentDepth < 2) return
-                              setAgentPrefetch(!checked)
-                            }}
-                          />
-                        </div>
-                        <div className='my-2 flex justify-center'>
-                          <div className='h-px w-[100%] bg-border' />
-                        </div>
-                        <div className='mb-3'>
+                      <div className='w-[220px]'>
+                        <div className='p-2 pb-0'>
                           <div className='mb-2 flex items-center justify-between'>
-                            <span className='font-medium text-xs'>Mode</span>
-                            <div className='flex items-center gap-1'>
-                              {getDepthIconFor(agentDepth)}
-                              <span className='text-muted-foreground text-xs'>
-                                {getDepthLabelFor(agentDepth)}
-                              </span>
+                            <div className='flex items-center gap-1.5'>
+                              <span className='font-medium text-xs'>MAX mode</span>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    type='button'
+                                    className='h-3.5 w-3.5 rounded text-muted-foreground transition-colors hover:text-foreground'
+                                    aria-label='MAX mode info'
+                                  >
+                                    <Info className='h-3.5 w-3.5' />
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent
+                                  side='right'
+                                  sideOffset={6}
+                                  align='center'
+                                  className='max-w-[220px] border bg-popover p-2 text-[11px] text-popover-foreground leading-snug shadow-md'
+                                >
+                                  Significantly increases depth of reasoning
+                                  <br />
+                                  <span className='text-[10px] text-muted-foreground italic'>
+                                    Only available for advanced models
+                                  </span>
+                                </TooltipContent>
+                              </Tooltip>
                             </div>
-                          </div>
-                          <div className='relative'>
-                            <CopilotSlider
-                              min={0}
-                              max={3}
-                              step={1}
-                              value={[agentDepth]}
-                              onValueChange={(val) =>
-                                setAgentDepth((val?.[0] ?? 0) as 0 | 1 | 2 | 3)
+                            <Switch
+                              checked={!agentPrefetch}
+                              disabled={['gpt-4o', 'gpt-4.1', 'gpt-5-fast'].includes(selectedModel)}
+                              title={
+                                ['gpt-4o', 'gpt-4.1', 'gpt-5-fast'].includes(selectedModel)
+                                  ? 'MAX mode is only available for advanced models'
+                                  : undefined
                               }
+                              onCheckedChange={(checked) => {
+                                if (['gpt-4o', 'gpt-4.1', 'gpt-5-fast'].includes(selectedModel))
+                                  return
+                                setAgentPrefetch(!checked)
+                              }}
                             />
-                            <div className='pointer-events-none absolute inset-0'>
-                              <div className='-translate-x-1/2 -translate-y-1/2 absolute top-1/2 left-[33.333%] h-2 w-[3px] bg-background' />
-                              <div className='-translate-x-1/2 -translate-y-1/2 absolute top-1/2 left-[66.667%] h-2 w-[3px] bg-background' />
-                            </div>
+                          </div>
+                          <div className='my-1.5 flex justify-center'>
+                            <div className='h-px w-[100%] bg-border' />
                           </div>
                         </div>
-                        <div className='mt-3 text-[11px] text-muted-foreground'>
-                          {getDepthDescription(agentDepth)}
+                        <div className='max-h-[280px] overflow-y-auto px-2 pb-2'>
+                          <div>
+                            <div className='mb-1'>
+                              <span className='font-medium text-xs'>Model</span>
+                            </div>
+                            <div className='space-y-2'>
+                              {/* Helper function to get icon for a model */}
+                              {(() => {
+                                const getModelIcon = (modelValue: string) => {
+                                  if (
+                                    ['gpt-5-high', 'o3', 'claude-4.1-opus'].includes(modelValue)
+                                  ) {
+                                    return (
+                                      <BrainCircuit className='h-3 w-3 text-muted-foreground' />
+                                    )
+                                  }
+                                  if (
+                                    [
+                                      'gpt-5',
+                                      'gpt-5-medium',
+                                      'claude-4-sonnet',
+                                      'claude-4.5-sonnet',
+                                    ].includes(modelValue)
+                                  ) {
+                                    return <Brain className='h-3 w-3 text-muted-foreground' />
+                                  }
+                                  if (['gpt-4o', 'gpt-4.1', 'gpt-5-fast'].includes(modelValue)) {
+                                    return <Zap className='h-3 w-3 text-muted-foreground' />
+                                  }
+                                  return <div className='h-3 w-3' />
+                                }
+
+                                const renderModelOption = (
+                                  option: (typeof modelOptions)[number]
+                                ) => (
+                                  <DropdownMenuItem
+                                    key={option.value}
+                                    onSelect={() => {
+                                      setSelectedModel(option.value)
+                                      // Automatically turn off max mode for fast models (Zap icon)
+                                      if (
+                                        ['gpt-4o', 'gpt-4.1', 'gpt-5-fast'].includes(
+                                          option.value
+                                        ) &&
+                                        !agentPrefetch
+                                      ) {
+                                        setAgentPrefetch(true)
+                                      }
+                                    }}
+                                    className={cn(
+                                      'flex h-7 items-center gap-1.5 px-2 py-1 text-left text-xs',
+                                      selectedModel === option.value ? 'bg-muted/50' : ''
+                                    )}
+                                  >
+                                    {getModelIcon(option.value)}
+                                    <span>{option.label}</span>
+                                  </DropdownMenuItem>
+                                )
+
+                                return (
+                                  <>
+                                    {/* OpenAI Models */}
+                                    <div>
+                                      <div className='px-2 py-1 font-medium text-[10px] text-muted-foreground uppercase'>
+                                        OpenAI
+                                      </div>
+                                      <div className='space-y-0.5'>
+                                        {modelOptions
+                                          .filter((option) =>
+                                            [
+                                              'gpt-5-fast',
+                                              'gpt-5',
+                                              'gpt-5-medium',
+                                              'gpt-5-high',
+                                              'gpt-4o',
+                                              'gpt-4.1',
+                                              'o3',
+                                            ].includes(option.value)
+                                          )
+                                          .map(renderModelOption)}
+                                      </div>
+                                    </div>
+
+                                    {/* Anthropic Models */}
+                                    <div>
+                                      <div className='px-2 py-1 font-medium text-[10px] text-muted-foreground uppercase'>
+                                        Anthropic
+                                      </div>
+                                      <div className='space-y-0.5'>
+                                        {modelOptions
+                                          .filter((option) =>
+                                            [
+                                              'claude-4-sonnet',
+                                              'claude-4.5-sonnet',
+                                              'claude-4.1-opus',
+                                            ].includes(option.value)
+                                          )
+                                          .map(renderModelOption)}
+                                      </div>
+                                    </div>
+                                  </>
+                                )
+                              })()}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </TooltipProvider>

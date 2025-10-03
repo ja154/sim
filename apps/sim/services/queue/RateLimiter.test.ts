@@ -3,7 +3,7 @@ import { RateLimiter } from '@/services/queue/RateLimiter'
 import { MANUAL_EXECUTION_LIMIT, RATE_LIMITS } from '@/services/queue/types'
 
 // Mock the database module
-vi.mock('@/db', () => ({
+vi.mock('@sim/db', () => ({
   db: {
     select: vi.fn(),
     insert: vi.fn(),
@@ -19,7 +19,12 @@ vi.mock('drizzle-orm', () => ({
   and: vi.fn((...conditions) => ({ and: conditions })),
 }))
 
-import { db } from '@/db'
+// Mock getHighestPrioritySubscription
+vi.mock('@/lib/billing/core/subscription', () => ({
+  getHighestPrioritySubscription: vi.fn().mockResolvedValue(null),
+}))
+
+import { db } from '@sim/db'
 
 describe('RateLimiter', () => {
   const rateLimiter = new RateLimiter()

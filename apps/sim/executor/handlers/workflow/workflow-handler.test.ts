@@ -4,6 +4,10 @@ import { WorkflowBlockHandler } from '@/executor/handlers/workflow/workflow-hand
 import type { ExecutionContext } from '@/executor/types'
 import type { SerializedBlock } from '@/serializer/types'
 
+vi.mock('@/lib/auth/internal', () => ({
+  generateInternalToken: vi.fn().mockResolvedValue('test-token'),
+}))
+
 // Mock fetch globally
 global.fetch = vi.fn()
 
@@ -14,6 +18,12 @@ describe('WorkflowBlockHandler', () => {
   let mockFetch: Mock
 
   beforeEach(() => {
+    // Mock window.location.origin for getBaseUrl()
+    ;(global as any).window = {
+      location: {
+        origin: 'http://localhost:3000',
+      },
+    }
     handler = new WorkflowBlockHandler()
     mockFetch = global.fetch as Mock
 
@@ -49,10 +59,6 @@ describe('WorkflowBlockHandler', () => {
 
     // Reset all mocks
     vi.clearAllMocks()
-
-    // Clear the static execution stack
-
-    ;(WorkflowBlockHandler as any).executionStack.clear()
 
     // Setup default fetch mock
     mockFetch.mockResolvedValue({
@@ -102,20 +108,6 @@ describe('WorkflowBlockHandler', () => {
       )
     })
 
-    it('should detect and prevent cyclic dependencies', async () => {
-      const inputs = { workflowId: 'child-workflow-id' }
-
-      // Simulate a cycle by adding the execution to the stack
-
-      ;(WorkflowBlockHandler as any).executionStack.add(
-        'parent-workflow-id_sub_child-workflow-id_workflow-block-1'
-      )
-
-      await expect(handler.execute(mockBlock, inputs, mockContext)).rejects.toThrow(
-        'Error in child workflow "child-workflow-id": Cyclic workflow dependency detected: parent-workflow-id_sub_child-workflow-id_workflow-block-1'
-      )
-    })
-
     it('should enforce maximum depth limit', async () => {
       const inputs = { workflowId: 'child-workflow-id' }
 
@@ -151,7 +143,7 @@ describe('WorkflowBlockHandler', () => {
       mockFetch.mockRejectedValueOnce(new Error('Network error'))
 
       await expect(handler.execute(mockBlock, inputs, mockContext)).rejects.toThrow(
-        'Error in child workflow "child-workflow-id": Child workflow child-workflow-id not found'
+        'Error in child workflow "child-workflow-id": Network error'
       )
     })
   })
@@ -185,9 +177,9 @@ describe('WorkflowBlockHandler', () => {
           }),
       })
 
-      const result = await (handler as any).loadChildWorkflow(workflowId)
-
-      expect(result).toBeNull()
+      await expect((handler as any).loadChildWorkflow(workflowId)).rejects.toThrow(
+        'Child workflow invalid-workflow has invalid state'
+      )
     })
   })
 

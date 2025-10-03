@@ -22,6 +22,8 @@ export const useGeneralStore = create<GeneralStore>()(
           isAutoPanEnabled: true,
           isConsoleExpandedByDefault: true,
           isDebugModeEnabled: false,
+          showFloatingControls: true,
+          showTrainingControls: false,
           theme: 'system' as const, // Keep for compatibility but not used
           telemetryEnabled: true,
           isLoading: false,
@@ -32,6 +34,10 @@ export const useGeneralStore = create<GeneralStore>()(
           isConsoleExpandedByDefaultLoading: false,
           isThemeLoading: false, // Keep for compatibility but not used
           isTelemetryLoading: false,
+          isBillingUsageNotificationsLoading: false,
+          isBillingUsageNotificationsEnabled: true,
+          isFloatingControlsLoading: false,
+          isTrainingControlsLoading: false,
         }
 
         // Optimistic update helper
@@ -99,6 +105,28 @@ export const useGeneralStore = create<GeneralStore>()(
             set({ isDebugModeEnabled: !get().isDebugModeEnabled })
           },
 
+          toggleFloatingControls: async () => {
+            if (get().isFloatingControlsLoading) return
+            const newValue = !get().showFloatingControls
+            await updateSettingOptimistic(
+              'showFloatingControls',
+              newValue,
+              'isFloatingControlsLoading',
+              'showFloatingControls'
+            )
+          },
+
+          toggleTrainingControls: async () => {
+            if (get().isTrainingControlsLoading) return
+            const newValue = !get().showTrainingControls
+            await updateSettingOptimistic(
+              'showTrainingControls',
+              newValue,
+              'isTrainingControlsLoading',
+              'showTrainingControls'
+            )
+          },
+
           setTheme: async (theme) => {
             if (get().isThemeLoading) return
 
@@ -133,6 +161,16 @@ export const useGeneralStore = create<GeneralStore>()(
             )
           },
 
+          setBillingUsageNotificationsEnabled: async (enabled: boolean) => {
+            if (get().isBillingUsageNotificationsLoading) return
+            await updateSettingOptimistic(
+              'isBillingUsageNotificationsEnabled',
+              enabled,
+              'isBillingUsageNotificationsLoading',
+              'isBillingUsageNotificationsEnabled'
+            )
+          },
+
           // API Actions
           loadSettings: async (force = false) => {
             // Skip if we've already loaded from DB and not forcing
@@ -156,16 +194,9 @@ export const useGeneralStore = create<GeneralStore>()(
                 // If parsing fails, continue to load from DB
               }
             }
-            // Skip loading if on a subdomain or chat path
-            if (
-              typeof window !== 'undefined' &&
-              (window.location.pathname.startsWith('/chat/') ||
-                (window.location.hostname !== 'sim.ai' &&
-                  window.location.hostname !== 'localhost' &&
-                  window.location.hostname !== '127.0.0.1' &&
-                  !window.location.hostname.startsWith('www.')))
-            ) {
-              logger.debug('Skipping settings load - on chat or subdomain page')
+            // Skip loading if on a chat path
+            if (typeof window !== 'undefined' && window.location.pathname.startsWith('/chat/')) {
+              logger.debug('Skipping settings load - on chat page')
               return
             }
 
@@ -191,8 +222,11 @@ export const useGeneralStore = create<GeneralStore>()(
                 isAutoConnectEnabled: data.autoConnect,
                 isAutoPanEnabled: data.autoPan ?? true,
                 isConsoleExpandedByDefault: data.consoleExpandedByDefault ?? true,
+                showFloatingControls: data.showFloatingControls ?? true,
+                showTrainingControls: data.showTrainingControls ?? false,
                 theme: data.theme || 'system',
                 telemetryEnabled: data.telemetryEnabled,
+                isBillingUsageNotificationsEnabled: data.billingUsageNotificationsEnabled ?? true,
                 isLoading: false,
               })
 
@@ -217,15 +251,8 @@ export const useGeneralStore = create<GeneralStore>()(
           },
 
           updateSetting: async (key, value) => {
-            if (
-              typeof window !== 'undefined' &&
-              (window.location.pathname.startsWith('/chat/') ||
-                (window.location.hostname !== 'sim.ai' &&
-                  window.location.hostname !== 'localhost' &&
-                  window.location.hostname !== '127.0.0.1' &&
-                  !window.location.hostname.startsWith('www.')))
-            ) {
-              logger.debug(`Skipping setting update for ${key} on chat or subdomain page`)
+            if (typeof window !== 'undefined' && window.location.pathname.startsWith('/chat/')) {
+              logger.debug(`Skipping setting update for ${key} on chat page`)
               return
             }
 

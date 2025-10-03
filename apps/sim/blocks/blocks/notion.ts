@@ -1,13 +1,15 @@
 import { NotionIcon } from '@/components/icons'
 import type { BlockConfig } from '@/blocks/types'
+import { AuthMode } from '@/blocks/types'
 import type { NotionResponse } from '@/tools/notion/types'
 
 export const NotionBlock: BlockConfig<NotionResponse> = {
   type: 'notion',
   name: 'Notion',
   description: 'Manage Notion pages',
+  authMode: AuthMode.OAuth,
   longDescription:
-    'Integrate with Notion to read content from pages, write new content, and create new pages.',
+    'Integrate with Notion into the workflow. Can read page, read database, create page, create database, append content, query database, and search workspace.',
   docsLink: 'https://docs.sim.ai/tools/notion',
   category: 'tools',
   bgColor: '#181C1E',
@@ -282,7 +284,7 @@ export const NotionBlock: BlockConfig<NotionResponse> = {
 
         return {
           ...rest,
-          accessToken: credential,
+          credential,
           ...(parsedProperties ? { properties: parsedProperties } : {}),
           ...(parsedFilter ? { filter: JSON.stringify(parsedFilter) } : {}),
           ...(parsedSorts ? { sorts: JSON.stringify(parsedSorts) } : {}),

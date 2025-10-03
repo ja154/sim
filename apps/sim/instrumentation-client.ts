@@ -5,43 +5,34 @@
  * It respects the user's telemetry preferences stored in localStorage.
  *
  */
-// This file configures the initialization of Sentry on the client.
-// The added config here will be used whenever a users loads a page in their browser.
-// https://docs.sentry.io/platforms/javascript/guides/nextjs/
-import {
-  BrowserClient,
-  breadcrumbsIntegration,
-  captureRouterTransitionStart,
-  dedupeIntegration,
-  defaultStackParser,
-  getCurrentScope,
-  linkedErrorsIntegration,
-  makeFetchTransport,
-} from '@sentry/nextjs'
-import { env, getEnv } from './lib/env'
-import { isProd } from './lib/environment'
+import posthog from 'posthog-js'
+import { env, getEnv, isTruthy } from './lib/env'
 
-// Only in production
-if (typeof window !== 'undefined' && isProd) {
-  const client = new BrowserClient({
-    dsn: getEnv('NEXT_PUBLIC_SENTRY_DSN') || undefined,
-    environment: env.NODE_ENV || 'development',
-    transport: makeFetchTransport,
-    stackParser: defaultStackParser,
-    integrations: [breadcrumbsIntegration(), dedupeIntegration(), linkedErrorsIntegration()],
-    beforeSend(event) {
-      if (event.request && typeof event.request === 'object') {
-        ;(event.request as any).ip = null
-      }
-      return event
+// Initialize PostHog only if explicitly enabled
+if (isTruthy(getEnv('NEXT_PUBLIC_POSTHOG_ENABLED')) && getEnv('NEXT_PUBLIC_POSTHOG_KEY')) {
+  posthog.init(getEnv('NEXT_PUBLIC_POSTHOG_KEY')!, {
+    api_host: '/ingest',
+    ui_host: 'https://us.posthog.com',
+    person_profiles: 'identified_only',
+    capture_pageview: true,
+    capture_pageleave: true,
+    capture_performance: true,
+    session_recording: {
+      maskAllInputs: false,
+      maskInputOptions: {
+        password: true,
+        email: false,
+      },
+      recordCrossOriginIframes: false,
+      recordHeaders: true,
+      recordBody: true,
     },
+    autocapture: true,
+    capture_dead_clicks: true,
+    persistence: 'localStorage+cookie',
+    enable_heatmaps: true,
   })
-
-  getCurrentScope().setClient(client)
-  client.init()
 }
-
-export const onRouterTransitionStart = isProd ? captureRouterTransitionStart : () => {}
 
 if (typeof window !== 'undefined') {
   const TELEMETRY_STATUS_KEY = 'simstudio-telemetry-status'

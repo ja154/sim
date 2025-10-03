@@ -1,9 +1,12 @@
+import { db, userStats, workflow, workflowSchedule } from '@sim/db'
 import { Cron } from 'croner'
 import { and, eq, lte, not, sql } from 'drizzle-orm'
 import { NextResponse } from 'next/server'
 import { v4 as uuidv4 } from 'uuid'
 import { z } from 'zod'
 import { checkServerSideUsageLimits } from '@/lib/billing'
+import { getHighestPrioritySubscription } from '@/lib/billing/core/subscription'
+import { getPersonalAndWorkspaceEnv } from '@/lib/environment/utils'
 import { createLogger } from '@/lib/logs/console/logger'
 import { LoggingSession } from '@/lib/logs/execution/logging-session'
 import { buildTraceSpans } from '@/lib/logs/execution/trace-spans/trace-spans'
@@ -13,24 +16,14 @@ import {
   getScheduleTimeValues,
   getSubBlockValue,
 } from '@/lib/schedules/utils'
-import { decryptSecret } from '@/lib/utils'
-import { loadWorkflowFromNormalizedTables } from '@/lib/workflows/db-helpers'
+import { decryptSecret, generateRequestId } from '@/lib/utils'
+import { loadDeployedWorkflowState } from '@/lib/workflows/db-helpers'
 import { updateWorkflowRunCounts } from '@/lib/workflows/utils'
-import { db } from '@/db'
-import {
-  environment as environmentTable,
-  subscription,
-  userStats,
-  workflow,
-  workflowSchedule,
-} from '@/db/schema'
 import { Executor } from '@/executor'
 import { Serializer } from '@/serializer'
 import { RateLimiter } from '@/services/queue'
-import type { SubscriptionPlan } from '@/services/queue/types'
 import { mergeSubblockState } from '@/stores/workflows/server-utils'
 
-// Add dynamic export to prevent caching
 export const dynamic = 'force-dynamic'
 
 const logger = createLogger('ScheduledExecuteAPI')
@@ -71,7 +64,7 @@ const runningExecutions = new Set<string>()
 
 export async function GET() {
   logger.info(`Scheduled execution triggered at ${new Date().toISOString()}`)
-  const requestId = crypto.randomUUID().slice(0, 8)
+  const requestId = generateRequestId()
   const now = new Date()
 
   let dueSchedules: (typeof workflowSchedule.$inferSelect)[] = []
@@ -113,19 +106,13 @@ export async function GET() {
           continue
         }
 
-        // Check rate limits for scheduled execution
-        const [subscriptionRecord] = await db
-          .select({ plan: subscription.plan })
-          .from(subscription)
-          .where(eq(subscription.referenceId, workflowRecord.userId))
-          .limit(1)
-
-        const subscriptionPlan = (subscriptionRecord?.plan || 'free') as SubscriptionPlan
+        // Check rate limits for scheduled execution (checks both personal and org subscriptions)
+        const userSubscription = await getHighestPrioritySubscription(workflowRecord.userId)
 
         const rateLimiter = new RateLimiter()
-        const rateLimitCheck = await rateLimiter.checkRateLimit(
+        const rateLimitCheck = await rateLimiter.checkRateLimitWithSubscription(
           workflowRecord.userId,
-          subscriptionPlan,
+          userSubscription,
           'schedule',
           false // schedules are always sync
         )
@@ -210,46 +197,26 @@ export async function GET() {
             )
 
             try {
-              // Load workflow data from normalized tables (no fallback to deprecated state column)
-              logger.debug(
-                `[${requestId}] Loading workflow ${schedule.workflowId} from normalized tables`
-              )
-              const normalizedData = await loadWorkflowFromNormalizedTables(schedule.workflowId)
+              logger.debug(`[${requestId}] Loading deployed workflow ${schedule.workflowId}`)
+              const deployedData = await loadDeployedWorkflowState(schedule.workflowId)
 
-              if (!normalizedData) {
-                logger.error(
-                  `[${requestId}] No normalized data found for scheduled workflow ${schedule.workflowId}`
-                )
-                throw new Error(
-                  `Workflow data not found in normalized tables for ${schedule.workflowId}`
-                )
-              }
-
-              // Use normalized data only
-              const blocks = normalizedData.blocks
-              const edges = normalizedData.edges
-              const loops = normalizedData.loops
-              const parallels = normalizedData.parallels
-              logger.info(
-                `[${requestId}] Loaded scheduled workflow ${schedule.workflowId} from normalized tables`
-              )
+              const blocks = deployedData.blocks
+              const edges = deployedData.edges
+              const loops = deployedData.loops
+              const parallels = deployedData.parallels
+              logger.info(`[${requestId}] Loaded deployed workflow ${schedule.workflowId}`)
 
               const mergedStates = mergeSubblockState(blocks)
 
-              // Retrieve environment variables for this user (if any).
-              const [userEnv] = await db
-                .select()
-                .from(environmentTable)
-                .where(eq(environmentTable.userId, workflowRecord.userId))
-                .limit(1)
-
-              if (!userEnv) {
-                logger.debug(
-                  `[${requestId}] No environment record found for user ${workflowRecord.userId}. Proceeding with empty variables.`
-                )
-              }
-
-              const variables = EnvVarsSchema.parse(userEnv?.variables ?? {})
+              // Retrieve environment variables with workspace precedence
+              const { personalEncrypted, workspaceEncrypted } = await getPersonalAndWorkspaceEnv(
+                workflowRecord.userId,
+                workflowRecord.workspaceId || undefined
+              )
+              const variables = EnvVarsSchema.parse({
+                ...personalEncrypted,
+                ...workspaceEncrypted,
+              })
 
               const currentBlockStates = await Object.entries(mergedStates).reduce(
                 async (accPromise, [id, block]) => {
@@ -410,6 +377,7 @@ export async function GET() {
                 contextExtensions: {
                   executionId,
                   workspaceId: workflowRecord.workspaceId || '',
+                  isDeployedContext: true,
                 },
               })
 
@@ -613,13 +581,12 @@ export async function GET() {
                 .where(eq(workflow.id, schedule.workflowId))
                 .limit(1)
 
-              if (workflowRecord) {
-                const normalizedData = await loadWorkflowFromNormalizedTables(schedule.workflowId)
-
-                if (!normalizedData) {
+              if (workflowRecord?.isDeployed) {
+                try {
+                  const deployedData = await loadDeployedWorkflowState(schedule.workflowId)
+                  nextRunAt = calculateNextRunTime(schedule, deployedData.blocks as any)
+                } catch {
                   nextRunAt = new Date(now.getTime() + 24 * 60 * 60 * 1000)
-                } else {
-                  nextRunAt = calculateNextRunTime(schedule, normalizedData.blocks)
                 }
               } else {
                 nextRunAt = new Date(now.getTime() + 24 * 60 * 60 * 1000)

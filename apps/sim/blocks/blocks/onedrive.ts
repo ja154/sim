@@ -1,13 +1,14 @@
 import { MicrosoftOneDriveIcon } from '@/components/icons'
 import type { BlockConfig } from '@/blocks/types'
+import { AuthMode } from '@/blocks/types'
 import type { OneDriveResponse } from '@/tools/onedrive/types'
 
 export const OneDriveBlock: BlockConfig<OneDriveResponse> = {
   type: 'onedrive',
   name: 'OneDrive',
   description: 'Create, upload, and list files',
-  longDescription:
-    'Integrate OneDrive functionality to manage files and folders. Upload new files, create new folders, and list contents of folders using OAuth authentication. Supports file operations with custom MIME types and folder organization.',
+  authMode: AuthMode.OAuth,
+  longDescription: 'Integrate OneDrive into the workflow. Can create, upload, and list files.',
   docsLink: 'https://docs.sim.ai/tools/onedrive',
   category: 'tools',
   bgColor: '#E0E0E0',
@@ -66,6 +67,7 @@ export const OneDriveBlock: BlockConfig<OneDriveResponse> = {
       title: 'Select Parent Folder',
       type: 'file-selector',
       layout: 'full',
+      canonicalParamId: 'folderId',
       provider: 'microsoft',
       serviceId: 'onedrive',
       requiredScopes: [
@@ -87,6 +89,7 @@ export const OneDriveBlock: BlockConfig<OneDriveResponse> = {
       title: 'Parent Folder ID',
       type: 'short-input',
       layout: 'full',
+      canonicalParamId: 'folderId',
       placeholder: 'Enter parent folder ID (leave empty for root folder)',
       dependsOn: ['credential'],
       mode: 'advanced',
@@ -105,6 +108,7 @@ export const OneDriveBlock: BlockConfig<OneDriveResponse> = {
       title: 'Select Parent Folder',
       type: 'file-selector',
       layout: 'full',
+      canonicalParamId: 'folderId',
       provider: 'microsoft',
       serviceId: 'onedrive',
       requiredScopes: [
@@ -127,6 +131,7 @@ export const OneDriveBlock: BlockConfig<OneDriveResponse> = {
       title: 'Parent Folder ID',
       type: 'short-input',
       layout: 'full',
+      canonicalParamId: 'folderId',
       placeholder: 'Enter parent folder ID (leave empty for root folder)',
       dependsOn: ['credential'],
       mode: 'advanced',
@@ -138,6 +143,7 @@ export const OneDriveBlock: BlockConfig<OneDriveResponse> = {
       title: 'Select Folder',
       type: 'file-selector',
       layout: 'full',
+      canonicalParamId: 'folderId',
       provider: 'microsoft',
       serviceId: 'onedrive',
       requiredScopes: [
@@ -160,6 +166,7 @@ export const OneDriveBlock: BlockConfig<OneDriveResponse> = {
       title: 'Folder ID',
       type: 'short-input',
       layout: 'full',
+      canonicalParamId: 'folderId',
       placeholder: 'Enter folder ID (leave empty for root folder)',
       dependsOn: ['credential'],
       mode: 'advanced',
@@ -200,12 +207,13 @@ export const OneDriveBlock: BlockConfig<OneDriveResponse> = {
       params: (params) => {
         const { credential, folderSelector, manualFolderId, mimeType, ...rest } = params
 
+        // Use folderSelector if provided, otherwise use manualFolderId
+        const effectiveFolderId = (folderSelector || manualFolderId || '').trim()
+
         return {
+          credential,
           ...rest,
-          accessToken: credential,
-          // Pass both; tools will prioritize manualFolderId over folderSelector
-          folderSelector,
-          manualFolderId,
+          folderId: effectiveFolderId || undefined,
           pageSize: rest.pageSize ? Number.parseInt(rest.pageSize as string, 10) : undefined,
           mimeType: mimeType,
         }

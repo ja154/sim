@@ -1,13 +1,13 @@
 import { JinaAIIcon } from '@/components/icons'
-import type { BlockConfig } from '@/blocks/types'
+import { AuthMode, type BlockConfig } from '@/blocks/types'
 import type { ReadUrlResponse } from '@/tools/jina/types'
 
 export const JinaBlock: BlockConfig<ReadUrlResponse> = {
   type: 'jina',
   name: 'Jina',
   description: 'Convert website content into text',
-  longDescription:
-    "Transform web content into clean, readable text using Jina AI's advanced extraction capabilities. Extract meaningful content from websites while preserving important information and optionally gathering links.",
+  authMode: AuthMode.ApiKey,
+  longDescription: 'Integrate Jina into the workflow. Extracts content from websites.',
   docsLink: 'https://docs.sim.ai/tools/jina',
   category: 'tools',
   bgColor: '#333333',

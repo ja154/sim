@@ -1,5 +1,6 @@
 import { MicrosoftPlannerIcon } from '@/components/icons'
 import type { BlockConfig } from '@/blocks/types'
+import { AuthMode } from '@/blocks/types'
 import type { MicrosoftPlannerResponse } from '@/tools/microsoft_planner/types'
 
 interface MicrosoftPlannerBlockParams {
@@ -19,8 +20,8 @@ export const MicrosoftPlannerBlock: BlockConfig<MicrosoftPlannerResponse> = {
   type: 'microsoft_planner',
   name: 'Microsoft Planner',
   description: 'Read and create tasks in Microsoft Planner',
-  longDescription:
-    'Integrate Microsoft Planner functionality to manage tasks. Read all user tasks, tasks from specific plans, individual tasks, or create new tasks with various properties like title, description, due date, and assignees using OAuth authentication.',
+  authMode: AuthMode.OAuth,
+  longDescription: 'Integrate Microsoft Planner into the workflow. Can read and create tasks.',
   docsLink: 'https://docs.sim.ai/tools/microsoft_planner',
   category: 'tools',
   bgColor: '#E0E0E0',
@@ -73,11 +74,12 @@ export const MicrosoftPlannerBlock: BlockConfig<MicrosoftPlannerResponse> = {
       condition: { field: 'operation', value: ['read_task'] },
       dependsOn: ['credential', 'planId'],
       mode: 'basic',
+      canonicalParamId: 'taskId',
     },
 
     // Advanced mode
     {
-      id: 'taskId',
+      id: 'manualTaskId',
       title: 'Manual Task ID',
       type: 'short-input',
       layout: 'full',
@@ -85,6 +87,7 @@ export const MicrosoftPlannerBlock: BlockConfig<MicrosoftPlannerResponse> = {
       condition: { field: 'operation', value: ['read_task'] },
       dependsOn: ['credential', 'planId'],
       mode: 'advanced',
+      canonicalParamId: 'taskId',
     },
 
     {
@@ -147,6 +150,7 @@ export const MicrosoftPlannerBlock: BlockConfig<MicrosoftPlannerResponse> = {
           operation,
           planId,
           taskId,
+          manualTaskId,
           title,
           description,
           dueDateTime,
@@ -160,13 +164,16 @@ export const MicrosoftPlannerBlock: BlockConfig<MicrosoftPlannerResponse> = {
           credential,
         }
 
+        // Handle both selector and manual task ID
+        const effectiveTaskId = (taskId || manualTaskId || '').trim()
+
         // For read operations
         if (operation === 'read_task') {
           const readParams: MicrosoftPlannerBlockParams = { ...baseParams }
 
           // If taskId is provided, add it (highest priority - get specific task)
-          if (taskId?.trim()) {
-            readParams.taskId = taskId.trim()
+          if (effectiveTaskId) {
+            readParams.taskId = effectiveTaskId
           }
           // If no taskId but planId is provided, add planId (get tasks from plan)
           else if (planId?.trim()) {
@@ -220,6 +227,7 @@ export const MicrosoftPlannerBlock: BlockConfig<MicrosoftPlannerResponse> = {
     credential: { type: 'string', description: 'Microsoft account credential' },
     planId: { type: 'string', description: 'Plan ID' },
     taskId: { type: 'string', description: 'Task ID' },
+    manualTaskId: { type: 'string', description: 'Manual Task ID' },
     title: { type: 'string', description: 'Task title' },
     description: { type: 'string', description: 'Task description' },
     dueDateTime: { type: 'string', description: 'Due date' },

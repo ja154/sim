@@ -1,13 +1,15 @@
 import { TavilyIcon } from '@/components/icons'
 import type { BlockConfig } from '@/blocks/types'
+import { AuthMode } from '@/blocks/types'
 import type { TavilyResponse } from '@/tools/tavily/types'
 
 export const TavilyBlock: BlockConfig<TavilyResponse> = {
   type: 'tavily',
   name: 'Tavily',
   description: 'Search and extract information',
+  authMode: AuthMode.ApiKey,
   longDescription:
-    "Access Tavily's AI-powered search engine to find relevant information from across the web. Extract and process content from specific URLs with customizable depth options.",
+    'Integrate Tavily into the workflow. Can search the web and extract content from specific URLs. Requires API Key.',
   category: 'tools',
   docsLink: 'https://docs.sim.ai/tools/tavily',
   bgColor: '#0066FF',

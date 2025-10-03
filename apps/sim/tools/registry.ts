@@ -48,12 +48,22 @@ import {
   googleDriveListTool,
   googleDriveUploadTool,
 } from '@/tools/google_drive'
+import { googleFormsGetResponsesTool } from '@/tools/google_form'
 import {
   googleSheetsAppendTool,
   googleSheetsReadTool,
   googleSheetsUpdateTool,
   googleSheetsWriteTool,
 } from '@/tools/google_sheets'
+import {
+  createMattersExportTool,
+  createMattersHoldsTool,
+  createMattersTool,
+  downloadExportFileTool,
+  listMattersExportTool,
+  listMattersHoldsTool,
+  listMattersTool,
+} from '@/tools/google_vault'
 import { requestTool as httpRequest } from '@/tools/http'
 import { huggingfaceChatTool } from '@/tools/huggingface'
 import {
@@ -91,6 +101,13 @@ import {
   microsoftTeamsWriteChatTool,
 } from '@/tools/microsoft_teams'
 import { mistralParserTool } from '@/tools/mistral'
+import {
+  deleteTool as mongodbDeleteTool,
+  executeTool as mongodbExecuteTool,
+  insertTool as mongodbInsertTool,
+  queryTool as mongodbQueryTool,
+  updateTool as mongodbUpdateTool,
+} from '@/tools/mongodb'
 import {
   deleteTool as mysqlDeleteTool,
   executeTool as mysqlExecuteTool,
@@ -133,14 +150,20 @@ import {
 } from '@/tools/postgresql'
 import { qdrantFetchTool, qdrantSearchTool, qdrantUpsertTool } from '@/tools/qdrant'
 import { redditGetCommentsTool, redditGetPostsTool, redditHotPostsTool } from '@/tools/reddit'
+import { mailSendTool } from '@/tools/resend'
 import { s3GetObjectTool } from '@/tools/s3'
 import { searchTool as serperSearch } from '@/tools/serper'
 import {
+  sharepointAddListItemTool,
+  sharepointCreateListTool,
   sharepointCreatePageTool,
+  sharepointGetListTool,
   sharepointListSitesTool,
   sharepointReadPageTool,
+  sharepointUpdateListItemTool,
 } from '@/tools/sharepoint'
 import { slackCanvasTool, slackMessageReaderTool, slackMessageTool } from '@/tools/slack'
+import { smsSendTool } from '@/tools/sms'
 import { stagehandAgentTool, stagehandExtractTool } from '@/tools/stagehand'
 import {
   supabaseDeleteTool,
@@ -194,6 +217,8 @@ export const tools: Record<string, ToolConfig> = {
   google_search: googleSearchTool,
   jina_read_url: readUrlTool,
   linkup_search: linkupSearchTool,
+  resend_send: mailSendTool,
+  sms_send: smsSendTool,
   jira_retrieve: jiraRetrieveTool,
   jira_update: jiraUpdateTool,
   jira_write: jiraWriteTool,
@@ -242,6 +267,11 @@ export const tools: Record<string, ToolConfig> = {
   postgresql_update: postgresUpdateTool,
   postgresql_delete: postgresDeleteTool,
   postgresql_execute: postgresExecuteTool,
+  mongodb_query: mongodbQueryTool,
+  mongodb_insert: mongodbInsertTool,
+  mongodb_update: mongodbUpdateTool,
+  mongodb_delete: mongodbDeleteTool,
+  mongodb_execute: mongodbExecuteTool,
   mysql_query: mysqlQueryTool,
   mysql_insert: mysqlInsertTool,
   mysql_update: mysqlUpdateTool,
@@ -323,6 +353,7 @@ export const tools: Record<string, ToolConfig> = {
   google_calendar_list: googleCalendarListTool,
   google_calendar_quick_add: googleCalendarQuickAddTool,
   google_calendar_invite: googleCalendarInviteTool,
+  google_forms_get_responses: googleFormsGetResponsesTool,
   workflow_executor: workflowExecutorTool,
   wealthbox_read_contact: wealthboxReadContactTool,
   wealthbox_write_contact: wealthboxWriteContactTool,
@@ -334,6 +365,13 @@ export const tools: Record<string, ToolConfig> = {
   wikipedia_search: wikipediaSearchTool,
   wikipedia_content: wikipediaPageContentTool,
   wikipedia_random: wikipediaRandomPageTool,
+  google_vault_create_matters_export: createMattersExportTool,
+  google_vault_list_matters_export: listMattersExportTool,
+  google_vault_create_matters_holds: createMattersHoldsTool,
+  google_vault_list_matters_holds: listMattersHoldsTool,
+  google_vault_create_matters: createMattersTool,
+  google_vault_list_matters: listMattersTool,
+  google_vault_download_export_file: downloadExportFileTool,
   qdrant_fetch_points: qdrantFetchTool,
   qdrant_search_vector: qdrantSearchTool,
   qdrant_upsert_points: qdrantUpsertTool,
@@ -346,6 +384,10 @@ export const tools: Record<string, ToolConfig> = {
   sharepoint_create_page: sharepointCreatePageTool,
   sharepoint_read_page: sharepointReadPageTool,
   sharepoint_list_sites: sharepointListSitesTool,
+  sharepoint_get_list: sharepointGetListTool,
+  sharepoint_create_list: sharepointCreateListTool,
+  sharepoint_update_list: sharepointUpdateListItemTool,
+  sharepoint_add_list_items: sharepointAddListItemTool,
   // Provider chat tools
   // Provider chat tools - handled separately in agent blocks
 }

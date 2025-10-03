@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ChevronsUpDown, Wand2 } from 'lucide-react'
+import { useParams } from 'next/navigation'
 import { useReactFlow } from 'reactflow'
 import { Button } from '@/components/ui/button'
 import { checkEnvVarTrigger, EnvVarDropdown } from '@/components/ui/env-var-dropdown'
@@ -10,10 +11,10 @@ import { createLogger } from '@/lib/logs/console/logger'
 import { cn } from '@/lib/utils'
 import { WandPromptBar } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/wand-prompt-bar/wand-prompt-bar'
 import { useSubBlockValue } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/workflow-block/components/sub-block/hooks/use-sub-block-value'
+import { useAccessibleReferencePrefixes } from '@/app/workspace/[workspaceId]/w/[workflowId]/hooks/use-accessible-reference-prefixes'
 import { useWand } from '@/app/workspace/[workspaceId]/w/[workflowId]/hooks/use-wand'
 import type { SubBlockConfig } from '@/blocks/types'
 import { useTagSelection } from '@/hooks/use-tag-selection'
-import { useOperationQueueStore } from '@/stores/operation-queue/store'
 
 const logger = createLogger('LongInput')
 
@@ -49,6 +50,8 @@ export function LongInput({
   onChange,
   disabled,
 }: LongInputProps) {
+  const params = useParams()
+  const workspaceId = params.workspaceId as string
   // Local state for immediate UI updates during streaming
   const [localContent, setLocalContent] = useState<string>('')
 
@@ -90,6 +93,7 @@ export function LongInput({
   const overlayRef = useRef<HTMLDivElement>(null)
   const [activeSourceBlockId, setActiveSourceBlockId] = useState<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const accessiblePrefixes = useAccessibleReferencePrefixes(blockId)
 
   // Use preview value when in preview mode, otherwise use store value or prop value
   const baseValue = isPreview ? previewValue : propValue !== undefined ? propValue : storeValue
@@ -379,11 +383,6 @@ export function LongInput({
           onScroll={handleScroll}
           onWheel={handleWheel}
           onKeyDown={handleKeyDown}
-          onBlur={() => {
-            try {
-              useOperationQueueStore.getState().flushDebouncedForBlock(blockId)
-            } catch {}
-          }}
           onFocus={() => {
             setShowEnvVars(false)
             setShowTags(false)
@@ -400,16 +399,18 @@ export function LongInput({
         />
         <div
           ref={overlayRef}
-          className='pointer-events-none absolute inset-0 whitespace-pre-wrap break-words bg-transparent px-3 py-2 text-sm'
+          className='pointer-events-none absolute inset-0 overflow-auto whitespace-pre-wrap break-words border border-transparent bg-transparent px-3 py-2 text-base md:text-sm'
           style={{
             fontFamily: 'inherit',
             lineHeight: 'inherit',
             width: '100%',
             height: `${height}px`,
-            overflow: 'hidden',
           }}
         >
-          {formatDisplayText(value?.toString() ?? '', true)}
+          {formatDisplayText(value?.toString() ?? '', {
+            accessiblePrefixes,
+            highlightAll: !accessiblePrefixes,
+          })}
         </div>
 
         {/* Wand Button */}
@@ -423,7 +424,7 @@ export function LongInput({
               }
               disabled={wandHook.isLoading || wandHook.isStreaming || disabled}
               aria-label='Generate content with AI'
-              className='h-8 w-8 rounded-full border border-transparent bg-muted/80 text-muted-foreground shadow-sm transition-all duration-200 hover:border-primary/20 hover:bg-muted hover:text-primary hover:shadow'
+              className='h-8 w-8 rounded-full border border-transparent bg-muted/80 text-muted-foreground shadow-sm transition-all duration-200 hover:border-primary/20 hover:bg-muted hover:text-foreground hover:shadow'
             >
               <Wand2 className='h-4 w-4' />
             </Button>
@@ -457,6 +458,7 @@ export function LongInput({
               searchTerm={searchTerm}
               inputValue={value?.toString() ?? ''}
               cursorPosition={cursorPosition}
+              workspaceId={workspaceId}
               onClose={() => {
                 setShowEnvVars(false)
                 setSearchTerm('')

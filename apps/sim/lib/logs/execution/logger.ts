@@ -1,7 +1,19 @@
+import { db } from '@sim/db'
+import {
+  member,
+  organization,
+  userStats,
+  user as userTable,
+  workflow,
+  workflowExecutionLogs,
+} from '@sim/db/schema'
 import { eq, sql } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
-import { getCostMultiplier, isBillingEnabled } from '@/lib/environment'
+import { getHighestPrioritySubscription } from '@/lib/billing/core/subscription'
+import { checkUsageStatus, maybeSendUsageThresholdEmail } from '@/lib/billing/core/usage'
+import { isBillingEnabled } from '@/lib/environment'
 import { createLogger } from '@/lib/logs/console/logger'
+import { emitWorkflowExecutionCompleted } from '@/lib/logs/events'
 import { snapshotService } from '@/lib/logs/execution/snapshot/service'
 import type {
   BlockOutputData,
@@ -13,8 +25,6 @@ import type {
   WorkflowExecutionSnapshot,
   WorkflowState,
 } from '@/lib/logs/types'
-import { db } from '@/db'
-import { userStats, workflow, workflowExecutionLogs } from '@/db/schema'
 
 export interface ToolCall {
   name: string
@@ -173,16 +183,129 @@ export class ExecutionLogger implements IExecutionLoggerService {
       throw new Error(`Workflow log not found for execution ${executionId}`)
     }
 
-    // Update user stats with cost information (same logic as original execution logger)
-    await this.updateUserStats(
-      updatedLog.workflowId,
-      costSummary,
-      updatedLog.trigger as ExecutionTrigger['type']
-    )
+    try {
+      const [wf] = await db.select().from(workflow).where(eq(workflow.id, updatedLog.workflowId))
+      if (wf) {
+        const [usr] = await db
+          .select({ id: userTable.id, email: userTable.email, name: userTable.name })
+          .from(userTable)
+          .where(eq(userTable.id, wf.userId))
+          .limit(1)
+
+        if (usr?.email) {
+          const sub = await getHighestPrioritySubscription(usr.id)
+
+          const costDelta = costSummary.totalCost
+
+          const planName = sub?.plan || 'Free'
+          const scope: 'user' | 'organization' =
+            sub && (sub.plan === 'team' || sub.plan === 'enterprise') ? 'organization' : 'user'
+
+          if (scope === 'user') {
+            const before = await checkUsageStatus(usr.id)
+
+            await this.updateUserStats(
+              updatedLog.workflowId,
+              costSummary,
+              updatedLog.trigger as ExecutionTrigger['type']
+            )
+
+            const limit = before.usageData.limit
+            const percentBefore = before.usageData.percentUsed
+            const percentAfter =
+              limit > 0 ? Math.min(100, percentBefore + (costDelta / limit) * 100) : percentBefore
+            const currentUsageAfter = before.usageData.currentUsage + costDelta
+
+            await maybeSendUsageThresholdEmail({
+              scope: 'user',
+              userId: usr.id,
+              userEmail: usr.email,
+              userName: usr.name || undefined,
+              planName,
+              percentBefore,
+              percentAfter,
+              currentUsageAfter,
+              limit,
+            })
+          } else if (sub?.referenceId) {
+            let orgLimit = 0
+            const orgRows = await db
+              .select({ orgUsageLimit: organization.orgUsageLimit })
+              .from(organization)
+              .where(eq(organization.id, sub.referenceId))
+              .limit(1)
+            const { getPlanPricing } = await import('@/lib/billing/core/billing')
+            const { basePrice } = getPlanPricing(sub.plan)
+            const minimum = (sub.seats || 1) * basePrice
+            if (orgRows.length > 0 && orgRows[0].orgUsageLimit) {
+              const configured = Number.parseFloat(orgRows[0].orgUsageLimit)
+              orgLimit = Math.max(configured, minimum)
+            } else {
+              orgLimit = minimum
+            }
+
+            const [{ sum: orgUsageBefore }] = await db
+              .select({ sum: sql`COALESCE(SUM(${userStats.currentPeriodCost}), 0)` })
+              .from(member)
+              .leftJoin(userStats, eq(member.userId, userStats.userId))
+              .where(eq(member.organizationId, sub.referenceId))
+              .limit(1)
+            const orgUsageBeforeNum = Number.parseFloat(
+              (orgUsageBefore as any)?.toString?.() || '0'
+            )
+
+            await this.updateUserStats(
+              updatedLog.workflowId,
+              costSummary,
+              updatedLog.trigger as ExecutionTrigger['type']
+            )
+
+            const percentBefore =
+              orgLimit > 0 ? Math.min(100, (orgUsageBeforeNum / orgLimit) * 100) : 0
+            const percentAfter =
+              orgLimit > 0
+                ? Math.min(100, percentBefore + (costDelta / orgLimit) * 100)
+                : percentBefore
+            const currentUsageAfter = orgUsageBeforeNum + costDelta
+
+            await maybeSendUsageThresholdEmail({
+              scope: 'organization',
+              organizationId: sub.referenceId,
+              planName,
+              percentBefore,
+              percentAfter,
+              currentUsageAfter,
+              limit: orgLimit,
+            })
+          }
+        } else {
+          await this.updateUserStats(
+            updatedLog.workflowId,
+            costSummary,
+            updatedLog.trigger as ExecutionTrigger['type']
+          )
+        }
+      } else {
+        await this.updateUserStats(
+          updatedLog.workflowId,
+          costSummary,
+          updatedLog.trigger as ExecutionTrigger['type']
+        )
+      }
+    } catch (e) {
+      try {
+        await this.updateUserStats(
+          updatedLog.workflowId,
+          costSummary,
+          updatedLog.trigger as ExecutionTrigger['type']
+        )
+      } catch {}
+      logger.warn('Usage threshold notification check failed (non-fatal)', { error: e })
+    }
 
     logger.debug(`Completed workflow execution ${executionId}`)
 
-    return {
+    const completedLog: WorkflowExecutionLog = {
       id: updatedLog.id,
       workflowId: updatedLog.workflowId,
       executionId: updatedLog.executionId,
@@ -196,6 +319,15 @@ export class ExecutionLogger implements IExecutionLoggerService {
       cost: updatedLog.cost as any,
       createdAt: updatedLog.createdAt.toISOString(),
     }
+
+    emitWorkflowExecutionCompleted(completedLog).catch((error) => {
+      logger.error('Failed to emit workflow execution completed event', {
+        error,
+        executionId,
+      })
+    })
+
+    return completedLog
   }
 
   async getWorkflowExecution(executionId: string): Promise<WorkflowExecutionLog | null> {
@@ -265,56 +397,50 @@ export class ExecutionLogger implements IExecutionLoggerService {
       }
 
       const userId = workflowRecord.userId
-      const costMultiplier = getCostMultiplier()
-      // Apply cost multiplier only to model costs, not base execution charge
-      const costToStore = costSummary.baseExecutionCharge + costSummary.modelCost * costMultiplier
+      const costToStore = costSummary.totalCost
 
-      // Check if user stats record exists
-      const userStatsRecords = await db.select().from(userStats).where(eq(userStats.userId, userId))
-
-      if (userStatsRecords.length > 0) {
-        // Update user stats record with trigger-specific increments
-        const updateFields: any = {
-          totalTokensUsed: sql`total_tokens_used + ${costSummary.totalTokens}`,
-          totalCost: sql`total_cost + ${costToStore}`,
-          currentPeriodCost: sql`current_period_cost + ${costToStore}`, // Track current billing period usage
-          lastActive: new Date(),
-        }
-
-        // Add trigger-specific increment
-        switch (trigger) {
-          case 'manual':
-            updateFields.totalManualExecutions = sql`total_manual_executions + 1`
-            break
-          case 'api':
-            updateFields.totalApiCalls = sql`total_api_calls + 1`
-            break
-          case 'webhook':
-            updateFields.totalWebhookTriggers = sql`total_webhook_triggers + 1`
-            break
-          case 'schedule':
-            updateFields.totalScheduledExecutions = sql`total_scheduled_executions + 1`
-            break
-          case 'chat':
-            updateFields.totalChatExecutions = sql`total_chat_executions + 1`
-            break
-        }
-
-        await db.update(userStats).set(updateFields).where(eq(userStats.userId, userId))
-
-        logger.debug('Updated user stats record with cost data', {
-          userId,
-          trigger,
-          addedCost: costToStore,
-          addedTokens: costSummary.totalTokens,
-        })
-      } else {
+      const existing = await db.select().from(userStats).where(eq(userStats.userId, userId))
+      if (existing.length === 0) {
         logger.error('User stats record not found - should be created during onboarding', {
           userId,
           trigger,
         })
-        return // Skip cost tracking if user stats doesn't exist
+        return
       }
+
+      const updateFields: any = {
+        totalTokensUsed: sql`total_tokens_used + ${costSummary.totalTokens}`,
+        totalCost: sql`total_cost + ${costToStore}`,
+        currentPeriodCost: sql`current_period_cost + ${costToStore}`,
+        lastActive: new Date(),
+      }
+
+      switch (trigger) {
+        case 'manual':
+          updateFields.totalManualExecutions = sql`total_manual_executions + 1`
+          break
+        case 'api':
+          updateFields.totalApiCalls = sql`total_api_calls + 1`
+          break
+        case 'webhook':
+          updateFields.totalWebhookTriggers = sql`total_webhook_triggers + 1`
+          break
+        case 'schedule':
+          updateFields.totalScheduledExecutions = sql`total_scheduled_executions + 1`
+          break
+        case 'chat':
+          updateFields.totalChatExecutions = sql`total_chat_executions + 1`
+          break
+      }
+
+      await db.update(userStats).set(updateFields).where(eq(userStats.userId, userId))
+
+      logger.debug('Updated user stats record with cost data', {
+        userId,
+        trigger,
+        addedCost: costToStore,
+        addedTokens: costSummary.totalTokens,
+      })
     } catch (error) {
       logger.error('Error updating user stats with cost information', {
         workflowId,

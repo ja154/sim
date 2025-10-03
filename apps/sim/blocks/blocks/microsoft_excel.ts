@@ -1,13 +1,15 @@
 import { MicrosoftExcelIcon } from '@/components/icons'
 import type { BlockConfig } from '@/blocks/types'
+import { AuthMode } from '@/blocks/types'
 import type { MicrosoftExcelResponse } from '@/tools/microsoft_excel/types'
 
 export const MicrosoftExcelBlock: BlockConfig<MicrosoftExcelResponse> = {
   type: 'microsoft_excel',
   name: 'Microsoft Excel',
   description: 'Read, write, and update data',
+  authMode: AuthMode.OAuth,
   longDescription:
-    'Integrate Microsoft Excel functionality to manage spreadsheet data. Read data from specific ranges, write new data, update existing cells, and manipulate table data using OAuth authentication. Supports various input and output formats for flexible data handling.',
+    'Integrate Microsoft Excel into the workflow. Can read, write, update, and add to table.',
   docsLink: 'https://docs.sim.ai/tools/microsoft_excel',
   category: 'tools',
   bgColor: '#E0E0E0',
@@ -41,6 +43,7 @@ export const MicrosoftExcelBlock: BlockConfig<MicrosoftExcelResponse> = {
       title: 'Select Sheet',
       type: 'file-selector',
       layout: 'full',
+      canonicalParamId: 'spreadsheetId',
       provider: 'microsoft-excel',
       serviceId: 'microsoft-excel',
       requiredScopes: [],
@@ -54,6 +57,7 @@ export const MicrosoftExcelBlock: BlockConfig<MicrosoftExcelResponse> = {
       title: 'Spreadsheet ID',
       type: 'short-input',
       layout: 'full',
+      canonicalParamId: 'spreadsheetId',
       placeholder: 'Enter spreadsheet ID',
       dependsOn: ['credential'],
       mode: 'advanced',
@@ -147,6 +151,9 @@ export const MicrosoftExcelBlock: BlockConfig<MicrosoftExcelResponse> = {
         const { credential, values, spreadsheetId, manualSpreadsheetId, tableName, ...rest } =
           params
 
+        // Handle both selector and manual input
+        const effectiveSpreadsheetId = (spreadsheetId || manualSpreadsheetId || '').trim()
+
         // Parse values from JSON string to array if it exists
         let parsedValues
         try {
@@ -155,13 +162,8 @@ export const MicrosoftExcelBlock: BlockConfig<MicrosoftExcelResponse> = {
           throw new Error('Invalid JSON format for values')
         }
 
-        // Use the selected spreadsheet ID or the manually entered one
-        const effectiveSpreadsheetId = (spreadsheetId || manualSpreadsheetId || '').trim()
-
         if (!effectiveSpreadsheetId) {
-          throw new Error(
-            'Spreadsheet ID is required. Please select a spreadsheet or enter an ID manually.'
-          )
+          throw new Error('Spreadsheet ID is required.')
         }
 
         // For table operations, ensure tableName is provided

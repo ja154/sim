@@ -127,8 +127,20 @@ DATABASE_URL="postgresql://postgres:your_password@localhost:5432/simstudio"
 
 4. Set up the database:
 
+First, configure the database package environment:
 ```bash
-bunx drizzle-kit migrate 
+cd packages/db
+cp .env.example .env 
+```
+
+Update your `packages/db/.env` file with the database URL:
+```bash
+DATABASE_URL="postgresql://postgres:your_password@localhost:5432/simstudio"
+```
+
+Then run the migrations:
+```bash
+bunx drizzle-kit migrate --config=./drizzle.config.ts
 ```
 
 5. Start the development servers:
@@ -159,7 +171,7 @@ bun run dev:sockets
 Copilot is a Sim-managed service. To use Copilot on a self-hosted instance:
 
 - Go to https://sim.ai → Settings → Copilot and generate a Copilot API key
-- Set `COPILOT_API_KEY` in your self-hosted environment to that value
+- Set `COPILOT_API_KEY` environment variable in your self-hosted apps/sim/.env file to that value
 
 ## Tech Stack
 
@@ -174,6 +186,7 @@ Copilot is a Sim-managed service. To use Copilot on a self-hosted instance:
 - **Monorepo**: [Turborepo](https://turborepo.org/)
 - **Realtime**: [Socket.io](https://socket.io/)
 - **Background Jobs**: [Trigger.dev](https://trigger.dev/)
+- **Remote Code Execution**: [E2B](https://www.e2b.dev/)
 
 ## Contributing
 

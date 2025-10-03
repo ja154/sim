@@ -46,7 +46,7 @@ describe('Copilot Chat API Route', () => {
     mockUpdate.mockReturnValue({ set: mockSet })
     mockSet.mockReturnValue({ where: mockWhere })
 
-    vi.doMock('@/db', () => ({
+    vi.doMock('@sim/db', () => ({
       db: {
         select: mockSelect,
         insert: mockInsert,
@@ -54,7 +54,7 @@ describe('Copilot Chat API Route', () => {
       },
     }))
 
-    vi.doMock('@/db/schema', () => ({
+    vi.doMock('@sim/db/schema', () => ({
       copilotChats: {
         id: 'id',
         userId: 'userId',
@@ -99,6 +99,7 @@ describe('Copilot Chat API Route', () => {
 
     vi.doMock('@/lib/utils', () => ({
       getRotatingApiKey: mockGetRotatingApiKey,
+      generateRequestId: vi.fn(() => 'test-request-id'),
     }))
 
     vi.doMock('@/lib/env', () => ({
@@ -219,12 +220,21 @@ describe('Copilot Chat API Route', () => {
                 content: 'Hello',
               },
             ],
+            chatMessages: [
+              {
+                role: 'user',
+                content: 'Hello',
+              },
+            ],
             workflowId: 'workflow-123',
             userId: 'user-123',
             stream: true,
             streamToolCalls: true,
+            model: 'claude-4.5-sonnet',
             mode: 'agent',
-            depth: 0,
+            messageId: 'mock-uuid-1234-5678',
+            version: '1.0.0',
+            chatId: 'chat-123',
           }),
         })
       )
@@ -281,12 +291,20 @@ describe('Copilot Chat API Route', () => {
               { role: 'assistant', content: 'Previous response' },
               { role: 'user', content: 'New message' },
             ],
+            chatMessages: [
+              { role: 'user', content: 'Previous message' },
+              { role: 'assistant', content: 'Previous response' },
+              { role: 'user', content: 'New message' },
+            ],
             workflowId: 'workflow-123',
             userId: 'user-123',
             stream: true,
             streamToolCalls: true,
+            model: 'claude-4.5-sonnet',
             mode: 'agent',
-            depth: 0,
+            messageId: 'mock-uuid-1234-5678',
+            version: '1.0.0',
+            chatId: 'chat-123',
           }),
         })
       )
@@ -332,12 +350,19 @@ describe('Copilot Chat API Route', () => {
               { role: 'system', content: 'User seems confused about the workflow' },
               { role: 'user', content: 'Hello' },
             ],
+            chatMessages: [
+              { role: 'system', content: 'User seems confused about the workflow' },
+              { role: 'user', content: 'Hello' },
+            ],
             workflowId: 'workflow-123',
             userId: 'user-123',
             stream: true,
             streamToolCalls: true,
+            model: 'claude-4.5-sonnet',
             mode: 'agent',
-            depth: 0,
+            messageId: 'mock-uuid-1234-5678',
+            version: '1.0.0',
+            chatId: 'chat-123',
           }),
         })
       )
@@ -420,12 +445,16 @@ describe('Copilot Chat API Route', () => {
         expect.objectContaining({
           body: JSON.stringify({
             messages: [{ role: 'user', content: 'What is this workflow?' }],
+            chatMessages: [{ role: 'user', content: 'What is this workflow?' }],
             workflowId: 'workflow-123',
             userId: 'user-123',
             stream: true,
             streamToolCalls: true,
+            model: 'claude-4.5-sonnet',
             mode: 'ask',
-            depth: 0,
+            messageId: 'mock-uuid-1234-5678',
+            version: '1.0.0',
+            chatId: 'chat-123',
           }),
         })
       )

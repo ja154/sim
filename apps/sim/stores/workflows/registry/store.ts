@@ -12,7 +12,6 @@ import type {
 import { getNextWorkflowColor } from '@/stores/workflows/registry/utils'
 import { useSubBlockStore } from '@/stores/workflows/subblock/store'
 import { useWorkflowStore } from '@/stores/workflows/workflow/store'
-import type { BlockState } from '@/stores/workflows/workflow/types'
 
 const logger = createLogger('WorkflowRegistry')
 
@@ -34,7 +33,7 @@ async function fetchWorkflowsFromDB(workspaceId?: string): Promise<void> {
   try {
     useWorkflowRegistry.getState().setLoading(true)
 
-    const url = new URL(API_ENDPOINTS.SYNC, window.location.origin)
+    const url = new URL(API_ENDPOINTS.WORKFLOWS, window.location.origin)
 
     if (workspaceId) {
       url.searchParams.append('workspaceId', workspaceId)
@@ -109,6 +108,7 @@ async function fetchWorkflowsFromDB(workspaceId?: string): Promise<void> {
         description: description || '',
         color: color || '#3972F6',
         lastModified: createdAt ? new Date(createdAt) : new Date(),
+        createdAt: createdAt ? new Date(createdAt) : new Date(),
         marketplaceData: marketplaceData || null,
         workspaceId,
         folderId: folderId || null,
@@ -123,27 +123,6 @@ async function fetchWorkflowsFromDB(workspaceId?: string): Promise<void> {
           needsRedeployment: false,
         }
       }
-
-      // Initialize subblock values
-      const subblockValues: Record<string, Record<string, any>> = {}
-      if (state?.blocks) {
-        Object.entries(state.blocks).forEach(([blockId, block]) => {
-          const blockState = block as BlockState
-          subblockValues[blockId] = {}
-
-          Object.entries(blockState.subBlocks || {}).forEach(([subblockId, subblock]) => {
-            subblockValues[blockId][subblockId] = subblock.value
-          })
-        })
-      }
-
-      // Update subblock store
-      useSubBlockStore.setState((state) => ({
-        workflowValues: {
-          ...state.workflowValues,
-          [id]: subblockValues,
-        },
-      }))
 
       if (variables && typeof variables === 'object') {
         useVariablesStore.setState((state) => {
@@ -505,23 +484,6 @@ export const useWorkflowRegistry = create<WorkflowRegistry>()(
               future: [],
             },
           }
-
-          // Extract and update subblock values
-          const subblockValues: Record<string, Record<string, any>> = {}
-          Object.entries(workflowState.blocks).forEach(([blockId, block]) => {
-            const blockState = block as any
-            subblockValues[blockId] = {}
-            Object.entries(blockState.subBlocks || {}).forEach(([subblockId, subblock]) => {
-              subblockValues[blockId][subblockId] = (subblock as any).value
-            })
-          })
-
-          useSubBlockStore.setState((state) => ({
-            workflowValues: {
-              ...state.workflowValues,
-              [id]: subblockValues,
-            },
-          }))
         } else {
           // If no state in DB, use empty state - server should have created start block
           workflowState = {
@@ -571,10 +533,11 @@ export const useWorkflowRegistry = create<WorkflowRegistry>()(
           }))
         }
 
+        // Update all stores atomically to prevent race conditions
+        // Set activeWorkflowId and workflow state together
+        set({ activeWorkflowId: id, error: null })
         useWorkflowStore.setState(workflowState)
         useSubBlockStore.getState().initializeFromWorkflow(id, (workflowState as any).blocks || {})
-
-        set({ activeWorkflowId: id, error: null })
 
         window.dispatchEvent(
           new CustomEvent('active-workflow-changed', {
@@ -631,6 +594,7 @@ export const useWorkflowRegistry = create<WorkflowRegistry>()(
             id: serverWorkflowId,
             name: createdWorkflow.name,
             lastModified: new Date(),
+            createdAt: new Date(),
             description: createdWorkflow.description,
             color: createdWorkflow.color,
             marketplaceData: options.marketplaceId
@@ -676,104 +640,9 @@ export const useWorkflowRegistry = create<WorkflowRegistry>()(
 
             logger.info(`Created workflow from marketplace: ${options.marketplaceId}`)
           } else {
-            // Create starter block for new workflow
-            const starterId = crypto.randomUUID()
-            const starterBlock = {
-              id: starterId,
-              type: 'starter' as const,
-              name: 'Start',
-              position: { x: 100, y: 100 },
-              subBlocks: {
-                startWorkflow: {
-                  id: 'startWorkflow',
-                  type: 'dropdown' as const,
-                  value: 'manual',
-                },
-                webhookPath: {
-                  id: 'webhookPath',
-                  type: 'short-input' as const,
-                  value: '',
-                },
-                webhookSecret: {
-                  id: 'webhookSecret',
-                  type: 'short-input' as const,
-                  value: '',
-                },
-                scheduleType: {
-                  id: 'scheduleType',
-                  type: 'dropdown' as const,
-                  value: 'daily',
-                },
-                minutesInterval: {
-                  id: 'minutesInterval',
-                  type: 'short-input' as const,
-                  value: '',
-                },
-                minutesStartingAt: {
-                  id: 'minutesStartingAt',
-                  type: 'short-input' as const,
-                  value: '',
-                },
-                hourlyMinute: {
-                  id: 'hourlyMinute',
-                  type: 'short-input' as const,
-                  value: '',
-                },
-                dailyTime: {
-                  id: 'dailyTime',
-                  type: 'short-input' as const,
-                  value: '',
-                },
-                weeklyDay: {
-                  id: 'weeklyDay',
-                  type: 'dropdown' as const,
-                  value: 'MON',
-                },
-                weeklyDayTime: {
-                  id: 'weeklyDayTime',
-                  type: 'short-input' as const,
-                  value: '',
-                },
-                monthlyDay: {
-                  id: 'monthlyDay',
-                  type: 'short-input' as const,
-                  value: '',
-                },
-                monthlyTime: {
-                  id: 'monthlyTime',
-                  type: 'short-input' as const,
-                  value: '',
-                },
-                cronExpression: {
-                  id: 'cronExpression',
-                  type: 'short-input' as const,
-                  value: '',
-                },
-                timezone: {
-                  id: 'timezone',
-                  type: 'dropdown' as const,
-                  value: 'UTC',
-                },
-              },
-              outputs: {
-                response: {
-                  type: {
-                    input: 'any',
-                  },
-                },
-              },
-              enabled: true,
-              horizontalHandles: true,
-              isWide: false,
-              advancedMode: false,
-              triggerMode: false,
-              height: 0,
-            }
-
+            // Create empty workflow (no default blocks)
             initialState = {
-              blocks: {
-                [starterId]: starterBlock,
-              },
+              blocks: {},
               edges: [],
               loops: {},
               parallels: {},
@@ -785,9 +654,7 @@ export const useWorkflowRegistry = create<WorkflowRegistry>()(
                 past: [],
                 present: {
                   state: {
-                    blocks: {
-                      [starterId]: starterBlock,
-                    },
+                    blocks: {},
                     edges: [],
                     loops: {},
                     parallels: {},
@@ -823,15 +690,8 @@ export const useWorkflowRegistry = create<WorkflowRegistry>()(
 
           // Initialize subblock values to ensure they're available for sync
           if (!options.marketplaceId) {
-            // For non-marketplace workflows, initialize subblock values from the starter block
+            // For non-marketplace workflows, initialize empty subblock values
             const subblockValues: Record<string, Record<string, any>> = {}
-            const blocks = initialState.blocks as Record<string, BlockState>
-            for (const [blockId, block] of Object.entries(blocks)) {
-              subblockValues[blockId] = {}
-              for (const [subblockId, subblock] of Object.entries(block.subBlocks)) {
-                subblockValues[blockId][subblockId] = (subblock as any).value
-              }
-            }
 
             // Update the subblock store with the initial values
             useSubBlockStore.setState((state) => ({
@@ -873,6 +733,7 @@ export const useWorkflowRegistry = create<WorkflowRegistry>()(
           id,
           name: metadata.name || generateCreativeWorkflowName(),
           lastModified: new Date(),
+          createdAt: new Date(),
           description: metadata.description || 'Imported from marketplace',
           color: metadata.color || getNextWorkflowColor(),
           marketplaceData: { id: marketplaceId, status: 'temp' as const },
@@ -940,7 +801,7 @@ export const useWorkflowRegistry = create<WorkflowRegistry>()(
               },
             }
 
-            const response = await fetch('/api/workflows/sync', {
+            const response = await fetch('/api/workflows', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -1029,6 +890,7 @@ export const useWorkflowRegistry = create<WorkflowRegistry>()(
           id,
           name: `${sourceWorkflow.name} (Copy)`,
           lastModified: new Date(),
+          createdAt: new Date(),
           description: sourceWorkflow.description,
           color: getNextWorkflowColor(),
           workspaceId, // Include the workspaceId in the new workflow
@@ -1223,7 +1085,11 @@ export const useWorkflowRegistry = create<WorkflowRegistry>()(
           }))
         }
 
-        // Workflow has already been persisted to the database via the duplication endpoint
+        try {
+          await useVariablesStore.getState().loadForWorkflow(id)
+        } catch (error) {
+          logger.warn(`Error hydrating variables for duplicated workflow ${id}:`, error)
+        }
 
         logger.info(
           `Duplicated workflow ${sourceId} to ${id} in workspace ${workspaceId || 'none'}`
@@ -1359,6 +1225,7 @@ export const useWorkflowRegistry = create<WorkflowRegistry>()(
               ...workflow,
               ...metadata,
               lastModified: new Date(),
+              createdAt: workflow.createdAt, // Preserve creation date
             },
           },
           error: null,
@@ -1391,6 +1258,9 @@ export const useWorkflowRegistry = create<WorkflowRegistry>()(
                 color: updatedWorkflow.color,
                 folderId: updatedWorkflow.folderId,
                 lastModified: new Date(updatedWorkflow.updatedAt),
+                createdAt: updatedWorkflow.createdAt
+                  ? new Date(updatedWorkflow.createdAt)
+                  : state.workflows[id].createdAt,
               },
             },
           }))

@@ -18,8 +18,12 @@ import {
   FileUpload,
   FolderSelectorInput,
   InputFormat,
+  InputMapping,
   KnowledgeBaseSelector,
   LongInput,
+  McpDynamicArgs,
+  McpServerSelector,
+  McpToolSelector,
   ProjectSelectorInput,
   ResponseFormat,
   ScheduleConfig,
@@ -34,6 +38,7 @@ import {
 } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/workflow-block/components/sub-block/components'
 import type { SubBlockConfig } from '@/blocks/types'
 import { DocumentTagEntry } from './components/document-tag-entry/document-tag-entry'
+import { E2BSwitch } from './components/e2b-switch'
 import { KnowledgeTagFilters } from './components/knowledge-tag-filters/knowledge-tag-filters'
 
 interface SubBlockProps {
@@ -203,6 +208,18 @@ export function SubBlock({
           />
         )
       case 'switch':
+        if (config.id === 'remoteExecution') {
+          return (
+            <E2BSwitch
+              blockId={blockId}
+              subBlockId={config.id}
+              title={config.title ?? ''}
+              isPreview={isPreview}
+              previewValue={previewValue}
+              disabled={isDisabled}
+            />
+          )
+        }
         return (
           <Switch
             blockId={blockId}
@@ -434,6 +451,17 @@ export function SubBlock({
           />
         )
       }
+      case 'input-mapping': {
+        return (
+          <InputMapping
+            blockId={blockId}
+            subBlockId={config.id}
+            isPreview={isPreview}
+            previewValue={previewValue}
+            disabled={isDisabled}
+          />
+        )
+      }
       case 'response-format':
         return (
           <ResponseFormat
@@ -451,6 +479,36 @@ export function SubBlock({
           <ChannelSelectorInput
             blockId={blockId}
             subBlock={config}
+            disabled={isDisabled}
+            isPreview={isPreview}
+            previewValue={previewValue}
+          />
+        )
+      case 'mcp-server-selector':
+        return (
+          <McpServerSelector
+            blockId={blockId}
+            subBlock={config}
+            disabled={isDisabled}
+            isPreview={isPreview}
+            previewValue={previewValue}
+          />
+        )
+      case 'mcp-tool-selector':
+        return (
+          <McpToolSelector
+            blockId={blockId}
+            subBlock={config}
+            disabled={isDisabled}
+            isPreview={isPreview}
+            previewValue={previewValue}
+          />
+        )
+      case 'mcp-dynamic-args':
+        return (
+          <McpDynamicArgs
+            blockId={blockId}
+            subBlockId={config.id}
             disabled={isDisabled}
             isPreview={isPreview}
             previewValue={previewValue}

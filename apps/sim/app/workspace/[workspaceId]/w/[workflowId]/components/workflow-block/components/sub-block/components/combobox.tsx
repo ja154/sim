@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown } from 'lucide-react'
+import { useParams } from 'next/navigation'
 import { useReactFlow } from 'reactflow'
 import { Button } from '@/components/ui/button'
 import { checkEnvVarTrigger, EnvVarDropdown } from '@/components/ui/env-var-dropdown'
@@ -9,6 +10,7 @@ import { checkTagTrigger, TagDropdown } from '@/components/ui/tag-dropdown'
 import { createLogger } from '@/lib/logs/console/logger'
 import { cn } from '@/lib/utils'
 import { useSubBlockValue } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/workflow-block/components/sub-block/hooks/use-sub-block-value'
+import { useAccessibleReferencePrefixes } from '@/app/workspace/[workspaceId]/w/[workflowId]/hooks/use-accessible-reference-prefixes'
 import type { SubBlockConfig } from '@/blocks/types'
 import { useTagSelection } from '@/hooks/use-tag-selection'
 
@@ -45,6 +47,8 @@ export function ComboBox({
   config,
   isWide = false,
 }: ComboBoxProps) {
+  const params = useParams()
+  const workspaceId = params.workspaceId as string
   const [storeValue, setStoreValue] = useSubBlockValue<string>(blockId, subBlockId)
   const [storeInitialized, setStoreInitialized] = useState(false)
   const [open, setOpen] = useState(false)
@@ -57,6 +61,7 @@ export function ComboBox({
   const [highlightedIndex, setHighlightedIndex] = useState(-1)
 
   const emitTagSelection = useTagSelection(blockId, subBlockId)
+  const accessiblePrefixes = useAccessibleReferencePrefixes(blockId)
 
   const inputRef = useRef<HTMLInputElement>(null)
   const overlayRef = useRef<HTMLDivElement>(null)
@@ -429,7 +434,10 @@ export function ComboBox({
           style={{ right: '42px' }}
         >
           <div className='w-full truncate text-foreground' style={{ scrollbarWidth: 'none' }}>
-            {formatDisplayText(displayValue, true)}
+            {formatDisplayText(displayValue, {
+              accessiblePrefixes,
+              highlightAll: !accessiblePrefixes,
+            })}
           </div>
         </div>
         {/* Chevron button */}
@@ -508,6 +516,7 @@ export function ComboBox({
         searchTerm={searchTerm}
         inputValue={displayValue}
         cursorPosition={cursorPosition}
+        workspaceId={workspaceId}
         onClose={() => {
           setShowEnvVars(false)
           setSearchTerm('')

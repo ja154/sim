@@ -1,22 +1,23 @@
-import crypto from 'crypto'
+import { db } from '@sim/db'
+import { userStats } from '@sim/db/schema'
 import { eq, sql } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { checkInternalApiKey } from '@/lib/copilot/utils'
 import { isBillingEnabled } from '@/lib/environment'
 import { createLogger } from '@/lib/logs/console/logger'
-import { db } from '@/db'
-import { userStats } from '@/db/schema'
+import { generateRequestId } from '@/lib/utils'
 import { calculateCost } from '@/providers/utils'
 
-const logger = createLogger('billing-update-cost')
+const logger = createLogger('BillingUpdateCostAPI')
 
 const UpdateCostSchema = z.object({
   userId: z.string().min(1, 'User ID is required'),
   input: z.number().min(0, 'Input tokens must be a non-negative number'),
   output: z.number().min(0, 'Output tokens must be a non-negative number'),
   model: z.string().min(1, 'Model is required'),
-  multiplier: z.number().min(0),
+  inputMultiplier: z.number().min(0),
+  outputMultiplier: z.number().min(0),
 })
 
 /**
@@ -24,7 +25,7 @@ const UpdateCostSchema = z.object({
  * Update user cost based on token usage with internal API key auth
  */
 export async function POST(req: NextRequest) {
-  const requestId = crypto.randomUUID().slice(0, 8)
+  const requestId = generateRequestId()
   const startTime = Date.now()
 
   try {
@@ -75,14 +76,15 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const { userId, input, output, model, multiplier } = validation.data
+    const { userId, input, output, model, inputMultiplier, outputMultiplier } = validation.data
 
     logger.info(`[${requestId}] Processing cost update`, {
       userId,
       input,
       output,
       model,
-      multiplier,
+      inputMultiplier,
+      outputMultiplier,
     })
 
     const finalPromptTokens = input
@@ -95,7 +97,8 @@ export async function POST(req: NextRequest) {
       finalPromptTokens,
       finalCompletionTokens,
       false,
-      multiplier
+      inputMultiplier,
+      outputMultiplier
     )
 
     logger.info(`[${requestId}] Cost calculation result`, {
@@ -104,7 +107,8 @@ export async function POST(req: NextRequest) {
       promptTokens: finalPromptTokens,
       completionTokens: finalCompletionTokens,
       totalTokens: totalTokens,
-      multiplier,
+      inputMultiplier,
+      outputMultiplier,
       costResult,
     })
 

@@ -1,4 +1,5 @@
 import type { Edge } from 'reactflow'
+import { BlockPathCalculator } from '@/lib/block-path-calculator'
 import { createLogger } from '@/lib/logs/console/logger'
 import { getBlock } from '@/blocks'
 import type { SubBlockConfig } from '@/blocks/types'
@@ -7,6 +8,21 @@ import type { BlockState, Loop, Parallel } from '@/stores/workflows/workflow/typ
 import { getTool } from '@/tools/utils'
 
 const logger = createLogger('Serializer')
+
+/**
+ * Structured validation error for pre-execution workflow validation
+ */
+export class WorkflowValidationError extends Error {
+  constructor(
+    message: string,
+    public blockId?: string,
+    public blockType?: string,
+    public blockName?: string
+  ) {
+    super(message)
+    this.name = 'WorkflowValidationError'
+  }
+}
 
 /**
  * Helper function to check if a subblock should be included in serialization based on current mode
@@ -29,21 +45,140 @@ export class Serializer {
     parallels?: Record<string, Parallel>,
     validateRequired = false
   ): SerializedWorkflow {
+    const safeLoops = loops || {}
+    const safeParallels = parallels || {}
+    const accessibleBlocksMap = this.computeAccessibleBlockIds(
+      blocks,
+      edges,
+      safeLoops,
+      safeParallels
+    )
+
+    if (validateRequired) {
+      this.validateSubflowsBeforeExecution(blocks, safeLoops, safeParallels)
+    }
+
     return {
       version: '1.0',
-      blocks: Object.values(blocks).map((block) => this.serializeBlock(block, validateRequired)),
+      blocks: Object.values(blocks).map((block) =>
+        this.serializeBlock(block, {
+          validateRequired,
+          allBlocks: blocks,
+          accessibleBlocksMap,
+        })
+      ),
       connections: edges.map((edge) => ({
         source: edge.source,
         target: edge.target,
         sourceHandle: edge.sourceHandle || undefined,
         targetHandle: edge.targetHandle || undefined,
       })),
-      loops,
-      parallels,
+      loops: safeLoops,
+      parallels: safeParallels,
     }
   }
 
-  private serializeBlock(block: BlockState, validateRequired = false): SerializedBlock {
+  /**
+   * Validate loop and parallel subflows for required inputs when running in "each/collection" modes
+   */
+  private validateSubflowsBeforeExecution(
+    blocks: Record<string, BlockState>,
+    loops: Record<string, Loop>,
+    parallels: Record<string, Parallel>
+  ): void {
+    // Validate loops in forEach mode
+    Object.values(loops || {}).forEach((loop) => {
+      if (!loop) return
+      if (loop.loopType === 'forEach') {
+        const items = (loop as any).forEachItems
+
+        const hasNonEmptyCollection = (() => {
+          if (items === undefined || items === null) return false
+          if (Array.isArray(items)) return items.length > 0
+          if (typeof items === 'object') return Object.keys(items).length > 0
+          if (typeof items === 'string') {
+            const trimmed = items.trim()
+            if (trimmed.length === 0) return false
+            // If it looks like JSON, parse to confirm non-empty [] / {}
+            if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+              try {
+                const parsed = JSON.parse(trimmed)
+                if (Array.isArray(parsed)) return parsed.length > 0
+                if (parsed && typeof parsed === 'object') return Object.keys(parsed).length > 0
+              } catch {
+                // Non-JSON or invalid JSON string – allow non-empty string (could be a reference like <start.items>)
+                return true
+              }
+            }
+            // Non-JSON string – allow (may be a variable reference/expression)
+            return true
+          }
+          return false
+        })()
+
+        if (!hasNonEmptyCollection) {
+          const blockName = blocks[loop.id]?.name || 'Loop'
+          const error = new WorkflowValidationError(
+            `${blockName} requires a collection for forEach mode. Provide a non-empty array/object or a variable reference.`,
+            loop.id,
+            'loop',
+            blockName
+          )
+          throw error
+        }
+      }
+    })
+
+    // Validate parallels in collection mode
+    Object.values(parallels || {}).forEach((parallel) => {
+      if (!parallel) return
+      if ((parallel as any).parallelType === 'collection') {
+        const distribution = (parallel as any).distribution
+
+        const hasNonEmptyDistribution = (() => {
+          if (distribution === undefined || distribution === null) return false
+          if (Array.isArray(distribution)) return distribution.length > 0
+          if (typeof distribution === 'object') return Object.keys(distribution).length > 0
+          if (typeof distribution === 'string') {
+            const trimmed = distribution.trim()
+            if (trimmed.length === 0) return false
+            // If it looks like JSON, parse to confirm non-empty [] / {}
+            if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+              try {
+                const parsed = JSON.parse(trimmed)
+                if (Array.isArray(parsed)) return parsed.length > 0
+                if (parsed && typeof parsed === 'object') return Object.keys(parsed).length > 0
+              } catch {
+                return true
+              }
+            }
+            return true
+          }
+          return false
+        })()
+
+        if (!hasNonEmptyDistribution) {
+          const blockName = blocks[parallel.id]?.name || 'Parallel'
+          const error = new WorkflowValidationError(
+            `${blockName} requires a collection for collection mode. Provide a non-empty array/object or a variable reference.`,
+            parallel.id,
+            'parallel',
+            blockName
+          )
+          throw error
+        }
+      }
+    })
+  }
+
+  private serializeBlock(
+    block: BlockState,
+    options: {
+      validateRequired: boolean
+      allBlocks: Record<string, BlockState>
+      accessibleBlocksMap: Map<string, Set<string>>
+    }
+  ): SerializedBlock {
     // Special handling for subflow blocks (loops, parallels, etc.)
     if (block.type === 'loop' || block.type === 'parallel') {
       return {
@@ -84,7 +219,7 @@ export class Serializer {
     }
 
     // Validate required fields that only users can provide (before execution starts)
-    if (validateRequired) {
+    if (options.validateRequired) {
       this.validateRequiredFieldsBeforeExecution(block, blockConfig, params)
     }
 
@@ -248,13 +383,52 @@ export class Serializer {
     blockConfig.subBlocks.forEach((subBlockConfig) => {
       const id = subBlockConfig.id
       if (
-        params[id] === null &&
+        (params[id] === null || params[id] === undefined) &&
         subBlockConfig.value &&
         shouldIncludeField(subBlockConfig, isAdvancedMode)
       ) {
-        // If the value is null and there's a default value function, use it
+        // If the value is absent and there's a default value function, use it
         params[id] = subBlockConfig.value(params)
       }
+    })
+
+    // Finally, consolidate canonical parameters (e.g., selector and manual ID into a single param)
+    const canonicalGroups: Record<string, { basic?: string; advanced: string[] }> = {}
+    blockConfig.subBlocks.forEach((sb) => {
+      if (!sb.canonicalParamId) return
+      const key = sb.canonicalParamId
+      if (!canonicalGroups[key]) canonicalGroups[key] = { basic: undefined, advanced: [] }
+      if (sb.mode === 'advanced') canonicalGroups[key].advanced.push(sb.id)
+      else canonicalGroups[key].basic = sb.id
+    })
+
+    Object.entries(canonicalGroups).forEach(([canonicalKey, group]) => {
+      const basicId = group.basic
+      const advancedIds = group.advanced
+      const basicVal = basicId ? params[basicId] : undefined
+      const advancedVal = advancedIds
+        .map((id) => params[id])
+        .find(
+          (v) => v !== undefined && v !== null && (typeof v !== 'string' || v.trim().length > 0)
+        )
+
+      let chosen: any
+      if (advancedVal !== undefined && basicVal !== undefined) {
+        chosen = isAdvancedMode ? advancedVal : basicVal
+      } else if (advancedVal !== undefined) {
+        chosen = advancedVal
+      } else if (basicVal !== undefined) {
+        chosen = isAdvancedMode ? undefined : basicVal
+      } else {
+        chosen = undefined
+      }
+
+      const sourceIds = [basicId, ...advancedIds].filter(Boolean) as string[]
+      sourceIds.forEach((id) => {
+        if (id !== canonicalKey) delete params[id]
+      })
+      if (chosen !== undefined) params[canonicalKey] = chosen
+      else delete params[canonicalKey]
     })
 
     return params
@@ -265,12 +439,12 @@ export class Serializer {
     blockConfig: any,
     params: Record<string, any>
   ) {
-    // Validate user-only required fields before execution starts
-    // This catches missing API keys, credentials, and other user-provided values early
-    // Fields that are user-or-llm will be validated later after parameter merging
-
-    // Skip validation if the block is in trigger mode
-    if (block.triggerMode || blockConfig.category === 'triggers') {
+    // Skip validation if the block is used as a trigger
+    if (
+      block.triggerMode === true ||
+      blockConfig.category === 'triggers' ||
+      params.triggerMode === true
+    ) {
       logger.info('Skipping validation for block in trigger mode', {
         blockId: block.id,
         blockType: block.type,
@@ -309,10 +483,74 @@ export class Serializer {
     // Iterate through the tool's parameters, not the block's subBlocks
     Object.entries(currentTool.params || {}).forEach(([paramId, paramConfig]) => {
       if (paramConfig.required && paramConfig.visibility === 'user-only') {
+        const subBlockConfig = blockConfig.subBlocks?.find((sb: any) => sb.id === paramId)
+
+        let shouldValidateParam = true
+
+        if (subBlockConfig) {
+          const isAdvancedMode = block.advancedMode ?? false
+          const includedByMode = shouldIncludeField(subBlockConfig, isAdvancedMode)
+
+          const includedByCondition = (() => {
+            const evalCond = (
+              condition:
+                | {
+                    field: string
+                    value: any
+                    not?: boolean
+                    and?: { field: string; value: any; not?: boolean }
+                  }
+                | (() => {
+                    field: string
+                    value: any
+                    not?: boolean
+                    and?: { field: string; value: any; not?: boolean }
+                  })
+                | undefined,
+              values: Record<string, any>
+            ): boolean => {
+              if (!condition) return true
+              const actual = typeof condition === 'function' ? condition() : condition
+              const fieldValue = values[actual.field]
+
+              const valueMatch = Array.isArray(actual.value)
+                ? fieldValue != null &&
+                  (actual.not
+                    ? !actual.value.includes(fieldValue)
+                    : actual.value.includes(fieldValue))
+                : actual.not
+                  ? fieldValue !== actual.value
+                  : fieldValue === actual.value
+
+              const andMatch = !actual.and
+                ? true
+                : (() => {
+                    const andFieldValue = values[actual.and!.field]
+                    return Array.isArray(actual.and!.value)
+                      ? andFieldValue != null &&
+                          (actual.and!.not
+                            ? !actual.and!.value.includes(andFieldValue)
+                            : actual.and!.value.includes(andFieldValue))
+                      : actual.and!.not
+                        ? andFieldValue !== actual.and!.value
+                        : andFieldValue === actual.and!.value
+                  })()
+
+              return valueMatch && andMatch
+            }
+
+            return evalCond(subBlockConfig.condition, params)
+          })()
+
+          shouldValidateParam = includedByMode && includedByCondition
+        }
+
+        if (!shouldValidateParam) {
+          return
+        }
+
         const fieldValue = params[paramId]
         if (fieldValue === undefined || fieldValue === null || fieldValue === '') {
-          // Find the corresponding subBlock to get the display title
-          const subBlockConfig = blockConfig.subBlocks?.find((sb: any) => sb.id === paramId)
           const displayName = subBlockConfig?.title || paramId
           missingFields.push(displayName)
         }
@@ -323,6 +561,46 @@ export class Serializer {
       const blockName = block.name || blockConfig.name || 'Block'
       throw new Error(`${blockName} is missing required fields: ${missingFields.join(', ')}`)
     }
+  }
+
+  private computeAccessibleBlockIds(
+    blocks: Record<string, BlockState>,
+    edges: Edge[],
+    loops: Record<string, Loop>,
+    parallels: Record<string, Parallel>
+  ): Map<string, Set<string>> {
+    const accessibleMap = new Map<string, Set<string>>()
+    const simplifiedEdges = edges.map((edge) => ({ source: edge.source, target: edge.target }))
+
+    const starterBlock = Object.values(blocks).find((block) => block.type === 'starter')
+
+    Object.keys(blocks).forEach((blockId) => {
+      const ancestorIds = BlockPathCalculator.findAllPathNodes(simplifiedEdges, blockId)
+      const accessibleIds = new Set<string>(ancestorIds)
+      accessibleIds.add(blockId)
+
+      if (starterBlock) {
+        accessibleIds.add(starterBlock.id)
+      }
+
+      Object.values(loops).forEach((loop) => {
+        if (!loop?.nodes) return
+        if (loop.nodes.includes(blockId)) {
+          loop.nodes.forEach((nodeId) => accessibleIds.add(nodeId))
+        }
+      })
+
+      Object.values(parallels).forEach((parallel) => {
+        if (!parallel?.nodes) return
+        if (parallel.nodes.includes(blockId)) {
+          parallel.nodes.forEach((nodeId) => accessibleIds.add(nodeId))
+        }
+      })
+
+      accessibleMap.set(blockId, accessibleIds)
+    })
+
+    return accessibleMap
   }
 
   deserializeWorkflow(workflow: SerializedWorkflow): {

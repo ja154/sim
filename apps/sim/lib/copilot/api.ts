@@ -57,14 +57,30 @@ export interface SendMessageRequest {
   chatId?: string
   workflowId?: string
   mode?: 'ask' | 'agent'
-  depth?: 0 | 1 | 2 | 3
+  model?:
+    | 'gpt-5-fast'
+    | 'gpt-5'
+    | 'gpt-5-medium'
+    | 'gpt-5-high'
+    | 'gpt-4o'
+    | 'gpt-4.1'
+    | 'o3'
+    | 'claude-4-sonnet'
+    | 'claude-4.5-sonnet'
+    | 'claude-4.1-opus'
   prefetch?: boolean
   createNewChat?: boolean
   stream?: boolean
   implicitFeedback?: string
   fileAttachments?: MessageFileAttachment[]
   abortSignal?: AbortSignal
-  contexts?: Array<{ kind: string; label?: string; chatId?: string; workflowId?: string }>
+  contexts?: Array<{
+    kind: string
+    label?: string
+    chatId?: string
+    workflowId?: string
+    executionId?: string
+  }>
 }
 
 /**

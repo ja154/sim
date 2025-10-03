@@ -13,7 +13,6 @@ describe('InputResolver', () => {
   let resolver: InputResolver
 
   beforeEach(() => {
-    // Set up a sample workflow with different types of blocks
     sampleWorkflow = {
       version: '1.0',
       blocks: [
@@ -64,7 +63,6 @@ describe('InputResolver', () => {
         },
       ],
       connections: [
-        // Add connections so blocks can reference each other
         { source: 'starter-block', target: 'function-block' },
         { source: 'function-block', target: 'condition-block' },
         { source: 'condition-block', target: 'api-block' },
@@ -73,13 +71,15 @@ describe('InputResolver', () => {
       loops: {},
     }
 
-    // Mock execution context
     mockContext = {
       workflowId: 'test-workflow',
-      workflow: sampleWorkflow, // Add workflow reference
+      workflow: sampleWorkflow,
       blockStates: new Map([
-        ['starter-block', { output: { input: 'Hello World', type: 'text' } }],
-        ['function-block', { output: { result: '42' } }], // String value as it would be in real app
+        [
+          'starter-block',
+          { output: { input: 'Hello World', type: 'text' }, executed: true, executionTime: 0 },
+        ],
+        ['function-block', { output: { result: '42' }, executed: true, executionTime: 0 }], // String value as it would be in real app
       ]),
       activeExecutionPath: new Set(['starter-block', 'function-block']),
       blockLogs: [],
@@ -92,13 +92,11 @@ describe('InputResolver', () => {
       executedBlocks: new Set(['starter-block', 'function-block']),
     }
 
-    // Mock environment variables
     mockEnvironmentVars = {
       API_KEY: 'test-api-key',
       BASE_URL: 'https://api.example.com',
     }
 
-    // Mock workflow variables
     mockWorkflowVars = {
       stringVar: {
         id: 'var1',
@@ -112,28 +110,28 @@ describe('InputResolver', () => {
         workflowId: 'test-workflow',
         name: 'numberVar',
         type: 'number',
-        value: '42', // Stored as string but should be converted to number
+        value: '42',
       },
       boolVar: {
         id: 'var3',
         workflowId: 'test-workflow',
         name: 'boolVar',
         type: 'boolean',
-        value: 'true', // Stored as string but should be converted to boolean
+        value: 'true',
       },
       objectVar: {
         id: 'var4',
         workflowId: 'test-workflow',
         name: 'objectVar',
         type: 'object',
-        value: '{"name":"John","age":30}', // Stored as string but should be parsed to object
+        value: '{"name":"John","age":30}',
       },
       arrayVar: {
         id: 'var5',
         workflowId: 'test-workflow',
         name: 'arrayVar',
         type: 'array',
-        value: '[1,2,3]', // Stored as string but should be parsed to array
+        value: '[1,2,3]',
       },
       plainVar: {
         id: 'var6',
@@ -144,27 +142,21 @@ describe('InputResolver', () => {
       },
     }
 
-    // Create accessibility map for block references
     const accessibleBlocksMap = new Map<string, Set<string>>()
-    // Allow all blocks to reference each other for testing
     const allBlockIds = sampleWorkflow.blocks.map((b) => b.id)
-    // Add common test block IDs
     const testBlockIds = ['test-block', 'test-block-2', 'generic-block']
     const allIds = [...allBlockIds, ...testBlockIds]
 
-    // Set up accessibility for workflow blocks
     sampleWorkflow.blocks.forEach((block) => {
       const accessibleBlocks = new Set(allIds)
       accessibleBlocksMap.set(block.id, accessibleBlocks)
     })
 
-    // Set up accessibility for test blocks
     testBlockIds.forEach((testId) => {
       const accessibleBlocks = new Set(allIds)
       accessibleBlocksMap.set(testId, accessibleBlocks)
     })
 
-    // Create resolver
     resolver = new InputResolver(
       sampleWorkflow,
       mockEnvironmentVars,
@@ -227,7 +219,7 @@ describe('InputResolver', () => {
 
       const result = resolver.resolveInputs(block, mockContext)
 
-      expect(result.directRef).toBe(42) // Should be converted to actual number
+      expect(result.directRef).toBe(42)
       expect(result.interpolated).toBe('The number is 42')
     })
 
@@ -253,7 +245,7 @@ describe('InputResolver', () => {
 
       const result = resolver.resolveInputs(block, mockContext)
 
-      expect(result.directRef).toBe(true) // Should be converted to boolean
+      expect(result.directRef).toBe(true)
       expect(result.interpolated).toBe('Is it true? true')
     })
 
@@ -277,7 +269,7 @@ describe('InputResolver', () => {
 
       const result = resolver.resolveInputs(block, mockContext)
 
-      expect(result.directRef).toEqual({ name: 'John', age: 30 }) // Should be parsed to object
+      expect(result.directRef).toEqual({ name: 'John', age: 30 })
     })
 
     it('should resolve plain text variables without quoting', () => {
@@ -318,7 +310,7 @@ describe('InputResolver', () => {
           params: {
             starterRef: '<starter-block.input>',
             functionRef: '<function-block.result>',
-            nameRef: '<Start.input>', // Reference by name
+            nameRef: '<Start.input>',
           },
         },
         inputs: {
@@ -333,7 +325,7 @@ describe('InputResolver', () => {
       const result = resolver.resolveInputs(block, mockContext)
 
       expect(result.starterRef).toBe('Hello World')
-      expect(result.functionRef).toBe('42') // String representation
+      expect(result.functionRef).toBe('42')
       expect(result.nameRef).toBe('Hello World') // Should resolve using block name
     })
 
@@ -371,7 +363,7 @@ describe('InputResolver', () => {
         config: {
           tool: 'generic',
           params: {
-            inactiveRef: '<condition-block.result>', // Not in activeExecutionPath
+            inactiveRef: '<condition-block.result>',
           },
         },
         inputs: {
@@ -381,17 +373,13 @@ describe('InputResolver', () => {
         enabled: true,
       }
 
-      // Since the condition-block is not in the active execution path,
-      // we expect it to be treated as inactive and return an empty string
       const result = resolver.resolveInputs(block, mockContext)
       expect(result.inactiveRef).toBe('')
     })
 
     it('should throw an error for references to disabled blocks', () => {
-      // Add connection from disabled block to test block so it's accessible
       sampleWorkflow.connections.push({ source: 'disabled-block', target: 'test-block' })
 
-      // Make sure disabled block stays disabled and add it to active path for validation
       const disabledBlock = sampleWorkflow.blocks.find((b) => b.id === 'disabled-block')!
       disabledBlock.enabled = false
       mockContext.activeExecutionPath.add('disabled-block')
@@ -421,14 +409,14 @@ describe('InputResolver', () => {
     it('should resolve environment variables in API key contexts', () => {
       const block: SerializedBlock = {
         id: 'test-block',
-        metadata: { id: BlockType.API, name: 'Test API Block' }, // API block type
+        metadata: { id: BlockType.API, name: 'Test API Block' },
         position: { x: 0, y: 0 },
         config: {
           tool: 'api',
           params: {
             apiKey: '{{API_KEY}}',
             url: 'https://example.com?key={{API_KEY}}',
-            regularParam: 'Base URL is: {{BASE_URL}}', // Should not be resolved in regular params
+            regularParam: 'Base URL is: {{BASE_URL}}',
           },
         },
         inputs: {
@@ -444,7 +432,7 @@ describe('InputResolver', () => {
 
       expect(result.apiKey).toBe('test-api-key')
       expect(result.url).toBe('https://example.com?key=test-api-key')
-      expect(result.regularParam).toBe('Base URL is: {{BASE_URL}}') // Should not be resolved
+      expect(result.regularParam).toBe('Base URL is: {{BASE_URL}}')
     })
 
     it('should resolve explicit environment variables', () => {
@@ -455,7 +443,7 @@ describe('InputResolver', () => {
         config: {
           tool: 'generic',
           params: {
-            explicitEnv: '{{BASE_URL}}', // Full string is just an env var
+            explicitEnv: '{{BASE_URL}}',
           },
         },
         inputs: {
@@ -490,7 +478,6 @@ describe('InputResolver', () => {
 
       const result = resolver.resolveInputs(block, mockContext)
 
-      // Environment variable should not be resolved in regular contexts
       expect(result.regularParam).toBe('Value with {{API_KEY}} embedded')
     })
   })
@@ -538,8 +525,8 @@ describe('InputResolver', () => {
 
       const result = resolver.resolveInputs(block, mockContext)
 
-      expect(result.tableParam[0].cells.Value).toBe('Hello') // string var
-      expect(result.tableParam[1].cells.Value).toBe(42) // number var - correctly typed
+      expect(result.tableParam[0].cells.Value).toBe('Hello')
+      expect(result.tableParam[1].cells.Value).toBe(42)
       expect(result.tableParam[2].cells.Value).toBe('Raw text without quotes') // plain var
     })
 
@@ -579,7 +566,7 @@ describe('InputResolver', () => {
       const result = resolver.resolveInputs(block, mockContext)
 
       expect(result.tableParam[0].cells.Value).toBe('Hello World')
-      expect(result.tableParam[1].cells.Value).toBe('42') // Result values come as strings
+      expect(result.tableParam[1].cells.Value).toBe('42')
     })
 
     it('should handle interpolated variable references in table cells', () => {
@@ -635,9 +622,7 @@ describe('InputResolver', () => {
 
       const result = resolver.resolveInputs(block, mockContext)
 
-      // String should be quoted in code context
       expect(result.code).toContain('const name = "Hello";')
-      // Number should not be quoted
       expect(result.code).toContain('const num = 42;')
     })
 
@@ -661,7 +646,6 @@ describe('InputResolver', () => {
 
       const result = resolver.resolveInputs(block, mockContext)
 
-      // Body should be parsed into an object
       expect(result.body).toEqual({
         name: 'Hello',
         value: 42,
@@ -688,7 +672,6 @@ describe('InputResolver', () => {
 
       const result = resolver.resolveInputs(block, mockContext)
 
-      // Conditions should be passed through without parsing for condition blocks
       expect(result.conditions).toBe('<start.input> === "Hello World"')
     })
   })
@@ -739,7 +722,7 @@ describe('InputResolver', () => {
         config: {
           tool: BlockType.FUNCTION,
           params: {
-            item: '<loop.currentItem>', // Direct reference, not wrapped in quotes
+            item: '<loop.currentItem>',
           },
         },
         inputs: {},
@@ -801,7 +784,7 @@ describe('InputResolver', () => {
         config: {
           tool: BlockType.FUNCTION,
           params: {
-            index: '<loop.index>', // Direct reference, not wrapped in quotes
+            index: '<loop.index>',
           },
         },
         inputs: {},
@@ -1373,7 +1356,7 @@ describe('InputResolver', () => {
       expect(result.code).toBe('return "Agent response"')
     })
 
-    it('should reject references to unconnected blocks', () => {
+    it('should leave references to unconnected blocks as strings', () => {
       // Create a new block that is added to the workflow but not connected to isolated-block
       workflowWithConnections.blocks.push({
         id: 'test-block',
@@ -1419,9 +1402,9 @@ describe('InputResolver', () => {
         enabled: true,
       }
 
-      expect(() => connectionResolver.resolveInputs(testBlock, contextWithConnections)).toThrow(
-        /Block "isolated-block" is not connected to this block/
-      )
+      // Should not throw - inaccessible references remain as strings
+      const result = connectionResolver.resolveInputs(testBlock, contextWithConnections)
+      expect(result.code).toBe('return <isolated-block.content>') // Reference remains as-is
     })
 
     it('should always allow references to starter block', () => {
@@ -1563,7 +1546,7 @@ describe('InputResolver', () => {
       expect(otherResult).toBe('content: Hello World')
     })
 
-    it('should provide helpful error messages for unconnected blocks', () => {
+    it('should not throw for unconnected blocks and leave references as strings', () => {
       // Create a test block in the workflow first
       workflowWithConnections.blocks.push({
         id: 'test-block-2',
@@ -1609,9 +1592,9 @@ describe('InputResolver', () => {
         enabled: true,
       }
 
-      expect(() => connectionResolver.resolveInputs(testBlock, contextWithConnections)).toThrow(
-        /Available connected blocks:.*Agent Block.*agent-1.*start/
-      )
+      // Should not throw - references to nonexistent blocks remain as strings
+      const result = connectionResolver.resolveInputs(testBlock, contextWithConnections)
+      expect(result.code).toBe('return <nonexistent.value>') // Reference remains as-is
     })
 
     it('should work with block names and normalized names', () => {
@@ -1742,7 +1725,7 @@ describe('InputResolver', () => {
         extendedResolver.resolveInputs(block1, extendedContext)
       }).not.toThrow()
 
-      // Should fail for indirect connection
+      // Should not fail for indirect connection - reference remains as string
       expect(() => {
         // Add the response block to the workflow so it can be validated properly
         extendedWorkflow.blocks.push({
@@ -1765,8 +1748,9 @@ describe('InputResolver', () => {
           outputs: {},
           enabled: true,
         }
-        extendedResolver.resolveInputs(block2, extendedContext)
-      }).toThrow(/Block "agent-1" is not connected to this block/)
+        const result = extendedResolver.resolveInputs(block2, extendedContext)
+        expect(result.test).toBe('<agent-1.content>') // Reference remains as-is since agent-1 is not accessible
+      }).not.toThrow()
     })
 
     it('should handle blocks in same loop referencing each other', () => {
@@ -2291,11 +2275,9 @@ describe('InputResolver', () => {
 
       const result = resolver.resolveInputs(testBlock, mockContext)
 
-      // Should include inputs without conditions
       expect(result).toHaveProperty('operation', 'upload')
       expect(result).toHaveProperty('alwaysVisible', 'always here')
 
-      // Should NOT include conditional field that doesn't match
       expect(result).not.toHaveProperty('conditionalField')
     })
 
@@ -2323,7 +2305,6 @@ describe('InputResolver', () => {
         ],
       })
 
-      // Test upload_chunk operation
       const uploadChunkBlock: SerializedBlock = {
         id: 'knowledge-block',
         metadata: { id: 'knowledge', name: 'Knowledge Block' },
@@ -2344,7 +2325,6 @@ describe('InputResolver', () => {
       expect(result1).toHaveProperty('operation', 'upload_chunk')
       expect(result1).toHaveProperty('content', 'chunk content here')
 
-      // Test create_document operation
       const createDocBlock: SerializedBlock = {
         id: 'knowledge-block',
         metadata: { id: 'knowledge', name: 'Knowledge Block' },
@@ -2365,7 +2345,6 @@ describe('InputResolver', () => {
       expect(result2).toHaveProperty('operation', 'create_document')
       expect(result2).toHaveProperty('content', 'document content here')
 
-      // Test search operation (should NOT include content)
       const searchBlock: SerializedBlock = {
         id: 'knowledge-block',
         metadata: { id: 'knowledge', name: 'Knowledge Block' },
@@ -2385,6 +2364,991 @@ describe('InputResolver', () => {
       const result3 = resolver.resolveInputs(searchBlock, mockContext)
       expect(result3).toHaveProperty('operation', 'search')
       expect(result3).not.toHaveProperty('content')
+    })
+  })
+
+  describe('2D Array Indexing', () => {
+    let arrayResolver: InputResolver
+    let arrayContext: any
+
+    beforeEach(() => {
+      const extendedWorkflow = {
+        ...sampleWorkflow,
+        blocks: [
+          ...sampleWorkflow.blocks,
+          {
+            id: 'array-block',
+            metadata: { id: 'generic', name: 'Array Block' },
+            position: { x: 100, y: 200 },
+            config: { tool: 'generic', params: {} },
+            inputs: {},
+            outputs: {},
+            enabled: true,
+          },
+          {
+            id: 'non-array-block',
+            metadata: { id: 'generic', name: 'Non Array Block' },
+            position: { x: 300, y: 200 },
+            config: { tool: 'generic', params: {} },
+            inputs: {},
+            outputs: {},
+            enabled: true,
+          },
+          {
+            id: 'single-array-block',
+            metadata: { id: 'generic', name: 'Single Array Block' },
+            position: { x: 400, y: 200 },
+            config: { tool: 'generic', params: {} },
+            inputs: {},
+            outputs: {},
+            enabled: true,
+          },
+        ],
+        connections: [
+          ...sampleWorkflow.connections,
+          { source: 'starter-block', target: 'array-block' },
+          { source: 'starter-block', target: 'non-array-block' },
+          { source: 'starter-block', target: 'single-array-block' },
+        ],
+      }
+
+      const extendedAccessibilityMap = new Map<string, Set<string>>()
+      const allBlockIds = extendedWorkflow.blocks.map((b) => b.id)
+      const testBlockIds = ['test-block', 'function-test', 'condition-test']
+      const allIds = [...allBlockIds, ...testBlockIds]
+
+      extendedWorkflow.blocks.forEach((block) => {
+        const accessibleBlocks = new Set(allIds)
+        extendedAccessibilityMap.set(block.id, accessibleBlocks)
+      })
+
+      testBlockIds.forEach((testId) => {
+        const accessibleBlocks = new Set(allIds)
+        extendedAccessibilityMap.set(testId, accessibleBlocks)
+      })
+
+      arrayResolver = new InputResolver(
+        extendedWorkflow,
+        mockEnvironmentVars,
+        mockWorkflowVars,
+        undefined,
+        extendedAccessibilityMap
+      )
+
+      arrayContext = {
+        ...mockContext,
+        workflow: extendedWorkflow,
+        blockStates: new Map([
+          ...mockContext.blockStates,
+          [
+            'array-block',
+            {
+              output: {
+                matrix: [
+                  ['a', 'b', 'c'],
+                  ['d', 'e', 'f'],
+                  ['g', 'h', 'i'],
+                ],
+                nestedData: {
+                  values: [
+                    [10, 20, 30],
+                    [40, 50, 60],
+                    [70, 80, 90],
+                  ],
+                },
+                deepNested: [
+                  [
+                    [1, 2, 3],
+                    [4, 5, 6],
+                  ],
+                  [
+                    [7, 8, 9],
+                    [10, 11, 12],
+                  ],
+                ],
+              },
+            },
+          ],
+          [
+            'non-array-block',
+            {
+              output: {
+                notAnArray: 'just a string',
+              },
+            },
+          ],
+          [
+            'single-array-block',
+            {
+              output: {
+                items: ['first', 'second', 'third'],
+              },
+            },
+          ],
+        ]),
+        activeExecutionPath: new Set([
+          ...mockContext.activeExecutionPath,
+          'array-block',
+          'non-array-block',
+          'single-array-block',
+        ]),
+      }
+    })
+
+    it.concurrent('should resolve basic 2D array access like matrix[0][1]', () => {
+      const block: SerializedBlock = {
+        id: 'test-block',
+        metadata: { id: 'generic', name: 'Test Block' },
+        position: { x: 0, y: 0 },
+        config: {
+          tool: 'generic',
+          params: {
+            value: '<array-block.matrix[0][1]>',
+          },
+        },
+        inputs: {
+          value: 'string',
+        },
+        outputs: {},
+        enabled: true,
+      }
+
+      const result = arrayResolver.resolveInputs(block, arrayContext)
+      expect(result.value).toBe('b')
+    })
+
+    it.concurrent('should resolve 2D array access with different indices', () => {
+      const block: SerializedBlock = {
+        id: 'test-block',
+        metadata: { id: 'generic', name: 'Test Block' },
+        position: { x: 0, y: 0 },
+        config: {
+          tool: 'generic',
+          params: {
+            topLeft: '<array-block.matrix[0][0]>',
+            center: '<array-block.matrix[1][1]>',
+            bottomRight: '<array-block.matrix[2][2]>',
+          },
+        },
+        inputs: {
+          topLeft: 'string',
+          center: 'string',
+          bottomRight: 'string',
+        },
+        outputs: {},
+        enabled: true,
+      }
+
+      const result = arrayResolver.resolveInputs(block, arrayContext)
+      expect(result.topLeft).toBe('a')
+      expect(result.center).toBe('e')
+      expect(result.bottomRight).toBe('i')
+    })
+
+    it.concurrent('should resolve property access combined with 2D array indexing', () => {
+      const block: SerializedBlock = {
+        id: 'test-block',
+        metadata: { id: 'generic', name: 'Test Block' },
+        position: { x: 0, y: 0 },
+        config: {
+          tool: 'generic',
+          params: {
+            value1: '<array-block.nestedData.values[0][1]>',
+            value2: '<array-block.nestedData.values[1][2]>',
+            value3: '<array-block.nestedData.values[2][0]>',
+          },
+        },
+        inputs: {
+          value1: 'string',
+          value2: 'string',
+          value3: 'string',
+        },
+        outputs: {},
+        enabled: true,
+      }
+
+      const result = arrayResolver.resolveInputs(block, arrayContext)
+      expect(result.value1).toBe('20')
+      expect(result.value2).toBe('60')
+      expect(result.value3).toBe('70')
+    })
+
+    it.concurrent('should resolve 3D array access (multiple nested indices)', () => {
+      const block: SerializedBlock = {
+        id: 'test-block',
+        metadata: { id: 'generic', name: 'Test Block' },
+        position: { x: 0, y: 0 },
+        config: {
+          tool: 'generic',
+          params: {
+            deep1: '<array-block.deepNested[0][0][1]>',
+            deep2: '<array-block.deepNested[0][1][2]>',
+            deep3: '<array-block.deepNested[1][0][0]>',
+            deep4: '<array-block.deepNested[1][1][2]>',
+          },
+        },
+        inputs: {
+          deep1: 'string',
+          deep2: 'string',
+          deep3: 'string',
+          deep4: 'string',
+        },
+        outputs: {},
+        enabled: true,
+      }
+
+      const result = arrayResolver.resolveInputs(block, arrayContext)
+      expect(result.deep1).toBe('2')
+      expect(result.deep2).toBe('6')
+      expect(result.deep3).toBe('7')
+      expect(result.deep4).toBe('12')
+    })
+
+    it.concurrent('should handle start block with 2D array access', () => {
+      arrayContext.blockStates.set('starter-block', {
+        output: {
+          input: 'Hello World',
+          type: 'text',
+          data: [
+            ['row1col1', 'row1col2'],
+            ['row2col1', 'row2col2'],
+          ],
+        },
+      })
+
+      const block: SerializedBlock = {
+        id: 'test-block',
+        metadata: { id: 'generic', name: 'Test Block' },
+        position: { x: 0, y: 0 },
+        config: {
+          tool: 'generic',
+          params: {
+            value1: '<start.data[0][0]>',
+            value2: '<start.data[0][1]>',
+            value3: '<start.data[1][0]>',
+            value4: '<start.data[1][1]>',
+          },
+        },
+        inputs: {
+          value1: 'string',
+          value2: 'string',
+          value3: 'string',
+          value4: 'string',
+        },
+        outputs: {},
+        enabled: true,
+      }
+
+      const result = arrayResolver.resolveInputs(block, arrayContext)
+      expect(result.value1).toBe('row1col1')
+      expect(result.value2).toBe('row1col2')
+      expect(result.value3).toBe('row2col1')
+      expect(result.value4).toBe('row2col2')
+    })
+
+    it.concurrent('should throw error for out of bounds 2D array access', () => {
+      const block: SerializedBlock = {
+        id: 'test-block',
+        metadata: { id: 'generic', name: 'Test Block' },
+        position: { x: 0, y: 0 },
+        config: {
+          tool: 'generic',
+          params: {
+            value: '<array-block.matrix[5][1]>', // Row 5 doesn't exist
+          },
+        },
+        inputs: {
+          value: 'string',
+        },
+        outputs: {},
+        enabled: true,
+      }
+
+      expect(() => arrayResolver.resolveInputs(block, arrayContext)).toThrow(
+        /Array index 5 is out of bounds/
+      )
+    })
+
+    it.concurrent('should throw error for out of bounds second dimension access', () => {
+      const block: SerializedBlock = {
+        id: 'test-block',
+        metadata: { id: 'generic', name: 'Test Block' },
+        position: { x: 0, y: 0 },
+        config: {
+          tool: 'generic',
+          params: {
+            value: '<array-block.matrix[1][5]>', // Column 5 doesn't exist
+          },
+        },
+        inputs: {
+          value: 'string',
+        },
+        outputs: {},
+        enabled: true,
+      }
+
+      expect(() => arrayResolver.resolveInputs(block, arrayContext)).toThrow(
+        /Array index 5 is out of bounds/
+      )
+    })
+
+    it.concurrent('should throw error when accessing non-array as array', () => {
+      const block: SerializedBlock = {
+        id: 'test-block',
+        metadata: { id: 'generic', name: 'Test Block' },
+        position: { x: 0, y: 0 },
+        config: {
+          tool: 'generic',
+          params: {
+            value: '<non-array-block.notAnArray[0][1]>',
+          },
+        },
+        inputs: {
+          value: 'string',
+        },
+        outputs: {},
+        enabled: true,
+      }
+
+      expect(() => arrayResolver.resolveInputs(block, arrayContext)).toThrow(/Invalid path/)
+    })
+
+    it.concurrent('should throw error with invalid index format', () => {
+      const block: SerializedBlock = {
+        id: 'test-block',
+        metadata: { id: 'generic', name: 'Test Block' },
+        position: { x: 0, y: 0 },
+        config: {
+          tool: 'generic',
+          params: {
+            value: '<array-block.matrix[0][abc]>', // Non-numeric index
+          },
+        },
+        inputs: {
+          value: 'string',
+        },
+        outputs: {},
+        enabled: true,
+      }
+
+      expect(() => arrayResolver.resolveInputs(block, arrayContext)).toThrow(
+        /No value found at path/
+      )
+    })
+
+    it.concurrent('should maintain backward compatibility with single array indexing', () => {
+      // Data is already set up in beforeEach
+
+      const block: SerializedBlock = {
+        id: 'test-block',
+        metadata: { id: 'generic', name: 'Test Block' },
+        position: { x: 0, y: 0 },
+        config: {
+          tool: 'generic',
+          params: {
+            first: '<single-array-block.items[0]>',
+            second: '<single-array-block.items[1]>',
+            third: '<single-array-block.items[2]>',
+          },
+        },
+        inputs: {
+          first: 'string',
+          second: 'string',
+          third: 'string',
+        },
+        outputs: {},
+        enabled: true,
+      }
+
+      const result = arrayResolver.resolveInputs(block, arrayContext)
+      expect(result.first).toBe('first')
+      expect(result.second).toBe('second')
+      expect(result.third).toBe('third')
+    })
+
+    it.concurrent('should handle mixed single and multi-dimensional access in same block', () => {
+      const block: SerializedBlock = {
+        id: 'test-block',
+        metadata: { id: 'generic', name: 'Test Block' },
+        position: { x: 0, y: 0 },
+        config: {
+          tool: 'generic',
+          params: {
+            singleDim: '<array-block.matrix[1]>', // Should return the whole row
+            multiDim: '<array-block.matrix[1][1]>', // Should return specific element
+          },
+        },
+        inputs: {
+          singleDim: 'string',
+          multiDim: 'string',
+        },
+        outputs: {},
+        enabled: true,
+      }
+
+      const result = arrayResolver.resolveInputs(block, arrayContext)
+      expect(result.singleDim).toEqual(['d', 'e', 'f']) // Whole row as array
+      expect(result.multiDim).toBe('e') // Specific element
+    })
+
+    it.concurrent('should properly format 2D array values for different block types', () => {
+      const functionBlock: SerializedBlock = {
+        id: 'function-test',
+        metadata: { id: BlockType.FUNCTION, name: 'Function Test' },
+        position: { x: 0, y: 0 },
+        config: {
+          tool: BlockType.FUNCTION,
+          params: {
+            code: 'return <array-block.matrix[0][1]>',
+          },
+        },
+        inputs: {},
+        outputs: {},
+        enabled: true,
+      }
+
+      const conditionBlock: SerializedBlock = {
+        id: 'condition-test',
+        metadata: { id: BlockType.CONDITION, name: 'Condition Test' },
+        position: { x: 0, y: 0 },
+        config: {
+          tool: BlockType.CONDITION,
+          params: {
+            conditions: '<array-block.matrix[0][1]> === "b"',
+          },
+        },
+        inputs: {},
+        outputs: {},
+        enabled: true,
+      }
+
+      const functionResult = arrayResolver.resolveInputs(functionBlock, arrayContext)
+      const conditionResult = arrayResolver.resolveInputs(conditionBlock, arrayContext)
+
+      expect(functionResult.code).toBe('return "b"') // Should be quoted for function
+      expect(conditionResult.conditions).toBe('<array-block.matrix[0][1]> === "b"') // Not resolved at input level
+    })
+  })
+
+  describe('Variable Reference Validation', () => {
+    it.concurrent('should allow block references without dots like <start>', () => {
+      const block: SerializedBlock = {
+        id: 'test-block',
+        metadata: { id: 'generic', name: 'Test Block' },
+        position: { x: 0, y: 0 },
+        config: {
+          tool: 'generic',
+          params: {
+            content: 'Value from <start> block',
+          },
+        },
+        inputs: {
+          content: 'string',
+        },
+        outputs: {},
+        enabled: true,
+      }
+
+      const result = resolver.resolveInputs(block, mockContext)
+
+      expect(result.content).not.toBe('Value from <start> block')
+    })
+
+    it.concurrent('should allow other block references without dots', () => {
+      const testAccessibility = new Map<string, Set<string>>()
+      const allIds = [
+        'starter-block',
+        'function-block',
+        'condition-block',
+        'api-block',
+        'testblock',
+      ]
+      allIds.forEach((id) => {
+        testAccessibility.set(id, new Set(allIds))
+      })
+      testAccessibility.set('test-block', new Set(allIds))
+
+      const extendedWorkflow = {
+        ...sampleWorkflow,
+        blocks: [
+          ...sampleWorkflow.blocks,
+          {
+            id: 'testblock',
+            metadata: { id: 'generic', name: 'TestBlock' },
+            position: { x: 500, y: 100 },
+            config: { tool: 'generic', params: {} },
+            inputs: {},
+            outputs: {},
+            enabled: true,
+          },
+        ],
+      }
+
+      const extendedContext = {
+        ...mockContext,
+        workflow: extendedWorkflow,
+        blockStates: new Map([
+          ...mockContext.blockStates,
+          ['testblock', { output: { result: 'test result' }, executed: true, executionTime: 0 }],
+        ]),
+        activeExecutionPath: new Set([...mockContext.activeExecutionPath, 'testblock']),
+      }
+
+      const testResolverWithExtended = new InputResolver(
+        extendedWorkflow,
+        mockEnvironmentVars,
+        mockWorkflowVars,
+        undefined,
+        testAccessibility
+      )
+
+      const block: SerializedBlock = {
+        id: 'test-block',
+        metadata: { id: 'generic', name: 'Test Block' },
+        position: { x: 0, y: 0 },
+        config: {
+          tool: 'generic',
+          params: {
+            content: 'Value from <testblock> is here',
+          },
+        },
+        inputs: {
+          content: 'string',
+        },
+        outputs: {},
+        enabled: true,
+      }
+
+      expect(() => testResolverWithExtended.resolveInputs(block, extendedContext)).not.toThrow()
+    })
+
+    it.concurrent('should reject operator expressions that look like comparisons', () => {
+      const block: SerializedBlock = {
+        id: 'condition-block',
+        metadata: { id: BlockType.CONDITION, name: 'Condition Block' },
+        position: { x: 0, y: 0 },
+        config: {
+          tool: 'condition',
+          params: {
+            conditions: 'x < 5 && 8 > b',
+          },
+        },
+        inputs: {
+          conditions: 'string',
+        },
+        outputs: {},
+        enabled: true,
+      }
+
+      const result = resolver.resolveInputs(block, mockContext)
+
+      expect(result.conditions).toBe('x < 5 && 8 > b')
+    })
+
+    it.concurrent('should still allow regular dotted references', () => {
+      const block: SerializedBlock = {
+        id: 'test-block',
+        metadata: { id: 'generic', name: 'Test Block' },
+        position: { x: 0, y: 0 },
+        config: {
+          tool: 'generic',
+          params: {
+            starterInput: '<start.input>',
+            functionResult: '<function-block.result>',
+            variableRef: '<variable.stringVar>',
+          },
+        },
+        inputs: {
+          starterInput: 'string',
+          functionResult: 'string',
+          variableRef: 'string',
+        },
+        outputs: {},
+        enabled: true,
+      }
+
+      const result = resolver.resolveInputs(block, mockContext)
+
+      expect(result.starterInput).toBe('Hello World')
+      expect(result.functionResult).toBe('42')
+      expect(result.variableRef).toBe('Hello')
+    })
+
+    it.concurrent(
+      'should handle complex expressions with both valid references and operators',
+      () => {
+        const block: SerializedBlock = {
+          id: 'condition-block',
+          metadata: { id: BlockType.CONDITION, name: 'Condition Block' },
+          position: { x: 0, y: 0 },
+          config: {
+            tool: 'condition',
+            params: {
+              conditions:
+                '<start.input> === "Hello" && x < 5 && 8 > y && <function-block.result> !== null',
+            },
+          },
+          inputs: {
+            conditions: 'string',
+          },
+          outputs: {},
+          enabled: true,
+        }
+
+        const result = resolver.resolveInputs(block, mockContext)
+
+        expect(result.conditions).toBe(
+          '<start.input> === "Hello" && x < 5 && 8 > y && <function-block.result> !== null'
+        )
+      }
+    )
+
+    it.concurrent('should reject numeric patterns that look like arithmetic', () => {
+      const block: SerializedBlock = {
+        id: 'test-block',
+        metadata: { id: 'generic', name: 'Test Block' },
+        position: { x: 0, y: 0 },
+        config: {
+          tool: 'generic',
+          params: {
+            content1: 'value < 5 is true',
+            content2: 'check 8 > x condition',
+            content3: 'result = 10 + 5',
+          },
+        },
+        inputs: {
+          content1: 'string',
+          content2: 'string',
+          content3: 'string',
+        },
+        outputs: {},
+        enabled: true,
+      }
+
+      const result = resolver.resolveInputs(block, mockContext)
+
+      expect(result.content1).toBe('value < 5 is true')
+      expect(result.content2).toBe('check 8 > x condition')
+      expect(result.content3).toBe('result = 10 + 5')
+    })
+  })
+
+  describe('Virtual Block Reference Resolution (Parallel Execution)', () => {
+    let parallelWorkflow: SerializedWorkflow
+    let parallelContext: ExecutionContext
+    let resolver: InputResolver
+
+    beforeEach(() => {
+      parallelWorkflow = {
+        version: '2.0',
+        blocks: [
+          {
+            id: 'start-block',
+            metadata: { id: BlockType.STARTER, name: 'Start', category: 'triggers' },
+            position: { x: 0, y: 0 },
+            config: { tool: BlockType.STARTER, params: {} },
+            inputs: {},
+            outputs: {},
+            enabled: true,
+          },
+          {
+            id: 'parallel-block',
+            metadata: { id: BlockType.PARALLEL, name: 'Parallel' },
+            position: { x: 200, y: 0 },
+            config: { tool: BlockType.PARALLEL, params: { count: 3 } },
+            inputs: {},
+            outputs: {},
+            enabled: true,
+          },
+          {
+            id: 'function1-block',
+            metadata: { id: BlockType.FUNCTION, name: 'Function 1' },
+            position: { x: 100, y: 100 },
+            config: {
+              tool: BlockType.FUNCTION,
+              params: { code: 'return <parallel.index>' },
+            },
+            inputs: {},
+            outputs: {},
+            enabled: true,
+          },
+          {
+            id: 'function2-block',
+            metadata: { id: BlockType.FUNCTION, name: 'Function 2' },
+            position: { x: 300, y: 100 },
+            config: {
+              tool: BlockType.FUNCTION,
+              params: { code: 'return <function1.result> * 2' },
+            },
+            inputs: {},
+            outputs: {},
+            enabled: true,
+          },
+        ],
+        connections: [
+          { source: 'start-block', target: 'parallel-block', sourceHandle: 'source' },
+          {
+            source: 'parallel-block',
+            target: 'function1-block',
+            sourceHandle: 'parallel-start-source',
+          },
+          { source: 'function1-block', target: 'function2-block', sourceHandle: 'source' },
+        ],
+        loops: {},
+        parallels: {
+          'parallel-block': {
+            id: 'parallel-block',
+            nodes: ['function1-block', 'function2-block'],
+            count: 3,
+          },
+        },
+      }
+
+      parallelContext = {
+        workflowId: 'test-parallel-workflow',
+        workflow: parallelWorkflow,
+        blockStates: new Map([
+          [
+            'function1-block',
+            { output: { result: 'should-not-use-this' }, executed: true, executionTime: 0 },
+          ],
+
+          [
+            'function1-block_parallel_parallel-block_iteration_0',
+            { output: { result: 0 }, executed: true, executionTime: 0 },
+          ],
+          [
+            'function2-block_parallel_parallel-block_iteration_0',
+            { output: { result: 0 }, executed: true, executionTime: 0 },
+          ],
+
+          [
+            'function1-block_parallel_parallel-block_iteration_1',
+            { output: { result: 1 }, executed: true, executionTime: 0 },
+          ],
+          [
+            'function2-block_parallel_parallel-block_iteration_1',
+            { output: { result: 2 }, executed: true, executionTime: 0 },
+          ],
+
+          [
+            'function1-block_parallel_parallel-block_iteration_2',
+            { output: { result: 2 }, executed: true, executionTime: 0 },
+          ],
+          [
+            'function2-block_parallel_parallel-block_iteration_2',
+            { output: { result: 4 }, executed: true, executionTime: 0 },
+          ],
+        ]),
+        activeExecutionPath: new Set([
+          'start-block',
+          'parallel-block',
+          'function1-block',
+          'function2-block',
+        ]),
+        blockLogs: [],
+        metadata: { startTime: new Date().toISOString(), duration: 0 },
+        environmentVariables: {},
+        decisions: { router: new Map(), condition: new Map() },
+        loopIterations: new Map(),
+        loopItems: new Map(),
+        completedLoops: new Set(),
+        executedBlocks: new Set(['start-block']),
+        parallelExecutions: new Map([
+          [
+            'parallel-block',
+            {
+              parallelCount: 3,
+              currentIteration: 3,
+              distributionItems: null,
+              completedExecutions: 3,
+              executionResults: new Map(),
+              activeIterations: new Set(),
+            },
+          ],
+        ]),
+        parallelBlockMapping: new Map([
+          [
+            'function2-block_parallel_parallel-block_iteration_0',
+            {
+              originalBlockId: 'function2-block',
+              parallelId: 'parallel-block',
+              iterationIndex: 0,
+            },
+          ],
+          [
+            'function2-block_parallel_parallel-block_iteration_1',
+            {
+              originalBlockId: 'function2-block',
+              parallelId: 'parallel-block',
+              iterationIndex: 1,
+            },
+          ],
+          [
+            'function2-block_parallel_parallel-block_iteration_2',
+            {
+              originalBlockId: 'function2-block',
+              parallelId: 'parallel-block',
+              iterationIndex: 2,
+            },
+          ],
+        ]),
+      }
+
+      resolver = new InputResolver(parallelWorkflow, {})
+    })
+
+    it('should resolve references to blocks within same parallel iteration', () => {
+      const function2Block = parallelWorkflow.blocks[3] // function2-block
+
+      parallelContext.currentVirtualBlockId = 'function2-block_parallel_parallel-block_iteration_0'
+
+      const result = resolver.resolveInputs(function2Block, parallelContext)
+
+      expect(result.code).toBe('return 0 * 2')
+    })
+
+    it('should resolve references correctly for different iterations', () => {
+      const function2Block = parallelWorkflow.blocks[3] // function2-block
+
+      parallelContext.currentVirtualBlockId = 'function2-block_parallel_parallel-block_iteration_1'
+      let result = resolver.resolveInputs(function2Block, parallelContext)
+      expect(result.code).toBe('return 1 * 2')
+
+      parallelContext.currentVirtualBlockId = 'function2-block_parallel_parallel-block_iteration_2'
+      result = resolver.resolveInputs(function2Block, parallelContext)
+      expect(result.code).toBe('return 2 * 2')
+    })
+
+    it('should fall back to regular resolution for blocks outside parallel', () => {
+      const function2Block: SerializedBlock = {
+        ...parallelWorkflow.blocks[3],
+        config: {
+          tool: BlockType.FUNCTION,
+          params: { code: 'return <start.input>' },
+        },
+      }
+
+      parallelContext.blockStates.set('start-block', {
+        output: { input: 'external-value' },
+        executed: true,
+        executionTime: 0,
+      })
+      parallelContext.currentVirtualBlockId = 'function2-block_parallel_parallel-block_iteration_0'
+
+      const result = resolver.resolveInputs(function2Block, parallelContext)
+
+      expect(result.code).toBe('return "external-value"')
+    })
+
+    it('should handle missing virtual block mapping gracefully', () => {
+      const function2Block = parallelWorkflow.blocks[3] // function2-block
+
+      parallelContext.parallelBlockMapping = new Map()
+      parallelContext.currentVirtualBlockId = 'function2-block_parallel_parallel-block_iteration_0'
+
+      const result = resolver.resolveInputs(function2Block, parallelContext)
+      expect(result.code).toBe('return "should-not-use-this" * 2') // Uses regular block state
+    })
+
+    it('should handle missing virtual block state gracefully', () => {
+      const function2Block = parallelWorkflow.blocks[3] // function2-block
+
+      parallelContext.blockStates.delete('function1-block_parallel_parallel-block_iteration_0')
+      parallelContext.currentVirtualBlockId = 'function2-block_parallel_parallel-block_iteration_0'
+
+      expect(() => {
+        resolver.resolveInputs(function2Block, parallelContext)
+      }).toThrow(/No state found for block/)
+    })
+
+    it('should not use virtual resolution when not in parallel execution', () => {
+      const function2Block = parallelWorkflow.blocks[3] // function2-block
+
+      parallelContext.currentVirtualBlockId = undefined
+      parallelContext.parallelBlockMapping = undefined
+
+      parallelContext.blockStates.set('function1-block', {
+        output: { result: 'regular-result' },
+        executed: true,
+        executionTime: 0,
+      })
+
+      const result = resolver.resolveInputs(function2Block, parallelContext)
+
+      expect(result.code).toBe('return "regular-result" * 2')
+    })
+
+    it('should handle complex references within parallel iterations', () => {
+      const function3Block: SerializedBlock = {
+        id: 'function3-block',
+        metadata: { id: BlockType.FUNCTION, name: 'Function 3' },
+        position: { x: 500, y: 100 },
+        config: {
+          tool: BlockType.FUNCTION,
+          params: { code: 'return <function1.result> + <function2.result>' },
+        },
+        inputs: {},
+        outputs: {},
+        enabled: true,
+      }
+
+      const updatedWorkflow = {
+        ...parallelWorkflow,
+        blocks: [...parallelWorkflow.blocks, function3Block],
+        connections: [
+          ...parallelWorkflow.connections,
+          { source: 'function1-block', target: 'function3-block', sourceHandle: 'source' },
+          { source: 'function2-block', target: 'function3-block', sourceHandle: 'source' },
+        ],
+        parallels: {
+          'parallel-block': {
+            id: 'parallel-block',
+            nodes: ['function1-block', 'function2-block', 'function3-block'],
+            count: 3,
+          },
+        },
+      }
+
+      parallelContext.workflow = updatedWorkflow
+
+      parallelContext.parallelBlockMapping?.set(
+        'function3-block_parallel_parallel-block_iteration_1',
+        {
+          originalBlockId: 'function3-block',
+          parallelId: 'parallel-block',
+          iterationIndex: 1,
+        }
+      )
+
+      parallelContext.currentVirtualBlockId = 'function3-block_parallel_parallel-block_iteration_1'
+
+      const updatedResolver = new InputResolver(updatedWorkflow, {})
+      const result = updatedResolver.resolveInputs(function3Block, parallelContext)
+
+      expect(result.code).toBe('return 1 + 2')
+    })
+
+    it('should validate that source block is in same parallel before using virtual resolution', () => {
+      const function2Block = parallelWorkflow.blocks[3] // function2-block
+
+      const modifiedWorkflow = {
+        ...parallelWorkflow,
+        parallels: {
+          'parallel-block': {
+            id: 'parallel-block',
+            nodes: ['function2-block'],
+            count: 3,
+          },
+        },
+      }
+
+      const modifiedResolver = new InputResolver(modifiedWorkflow, {})
+      parallelContext.workflow = modifiedWorkflow
+      parallelContext.currentVirtualBlockId = 'function2-block_parallel_parallel-block_iteration_0'
+
+      const result = modifiedResolver.resolveInputs(function2Block, parallelContext)
+      expect(result.code).toBe('return "should-not-use-this" * 2')
     })
   })
 })

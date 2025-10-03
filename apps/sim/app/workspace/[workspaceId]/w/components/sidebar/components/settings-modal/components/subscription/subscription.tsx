@@ -1,7 +1,6 @@
 'use client'
-
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Skeleton } from '@/components/ui'
+import { Skeleton, Switch } from '@/components/ui'
 import { useSession } from '@/lib/auth-client'
 import { useSubscriptionUpgrade } from '@/lib/subscription/upgrade'
 import { cn } from '@/lib/utils'
@@ -22,6 +21,7 @@ import {
   getVisiblePlans,
 } from '@/app/workspace/[workspaceId]/w/components/sidebar/components/settings-modal/components/subscription/subscription-permissions'
 import { useOrganizationStore } from '@/stores/organization'
+import { useGeneralStore } from '@/stores/settings/general/store'
 import { useSubscriptionStore } from '@/stores/subscription/store'
 
 const CONSTANTS = {
@@ -500,6 +500,9 @@ export function Subscription({ onOpenChange }: SubscriptionProps) {
           </div>
         )}
 
+        {/* Billing usage notifications toggle */}
+        {subscription.isPaid && <BillingUsageNotificationsToggle />}
+
         {subscription.isEnterprise && (
           <div className='text-center'>
             <p className='text-muted-foreground text-xs'>
@@ -524,6 +527,33 @@ export function Subscription({ onOpenChange }: SubscriptionProps) {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function BillingUsageNotificationsToggle() {
+  const isLoading = useGeneralStore((s) => s.isBillingUsageNotificationsLoading)
+  const enabled = useGeneralStore((s) => s.isBillingUsageNotificationsEnabled)
+  const setEnabled = useGeneralStore((s) => s.setBillingUsageNotificationsEnabled)
+  const loadSettings = useGeneralStore((s) => s.loadSettings)
+
+  useEffect(() => {
+    void loadSettings()
+  }, [loadSettings])
+
+  return (
+    <div className='mt-4 flex items-center justify-between'>
+      <div className='flex flex-col'>
+        <span className='font-medium text-sm'>Usage notifications</span>
+        <span className='text-muted-foreground text-xs'>Email me when I reach 80% usage</span>
+      </div>
+      <Switch
+        checked={!!enabled}
+        disabled={isLoading}
+        onCheckedChange={(v: boolean) => {
+          void setEnabled(v)
+        }}
+      />
     </div>
   )
 }

@@ -1,3 +1,4 @@
+import { getCostMultiplier } from '@/lib/environment'
 import { createLogger } from '@/lib/logs/console/logger'
 import type { StreamingExecution } from '@/executor/types'
 import type { ProviderRequest, ProviderResponse } from '@/providers/types'
@@ -86,8 +87,16 @@ export async function executeProviderRequest(
     const { prompt: promptTokens = 0, completion: completionTokens = 0 } = response.tokens
     const useCachedInput = !!request.context && request.context.length > 0
 
-    if (shouldBillModelUsage(response.model, request.apiKey)) {
-      response.cost = calculateCost(response.model, promptTokens, completionTokens, useCachedInput)
+    if (shouldBillModelUsage(response.model)) {
+      const costMultiplier = getCostMultiplier()
+      response.cost = calculateCost(
+        response.model,
+        promptTokens,
+        completionTokens,
+        useCachedInput,
+        costMultiplier,
+        costMultiplier
+      )
     } else {
       response.cost = {
         input: 0,

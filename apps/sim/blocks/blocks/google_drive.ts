@@ -1,13 +1,14 @@
 import { GoogleDriveIcon } from '@/components/icons'
 import type { BlockConfig } from '@/blocks/types'
+import { AuthMode } from '@/blocks/types'
 import type { GoogleDriveResponse } from '@/tools/google_drive/types'
 
 export const GoogleDriveBlock: BlockConfig<GoogleDriveResponse> = {
   type: 'google_drive',
   name: 'Google Drive',
   description: 'Create, upload, and list files',
-  longDescription:
-    'Integrate Google Drive functionality to manage files and folders. Upload new files, get content from existing files, create new folders, and list contents of folders using OAuth authentication. Supports file operations with custom MIME types and folder organization.',
+  authMode: AuthMode.OAuth,
+  longDescription: 'Integrate Google Drive into the workflow. Can create, upload, and list files.',
   docsLink: 'https://docs.sim.ai/tools/google_drive',
   category: 'tools',
   bgColor: '#E0E0E0',
@@ -76,6 +77,7 @@ export const GoogleDriveBlock: BlockConfig<GoogleDriveResponse> = {
       title: 'Select Parent Folder',
       type: 'file-selector',
       layout: 'full',
+      canonicalParamId: 'folderId',
       provider: 'google-drive',
       serviceId: 'google-drive',
       requiredScopes: ['https://www.googleapis.com/auth/drive.file'],
@@ -90,6 +92,7 @@ export const GoogleDriveBlock: BlockConfig<GoogleDriveResponse> = {
       title: 'Parent Folder ID',
       type: 'short-input',
       layout: 'full',
+      canonicalParamId: 'folderId',
       placeholder: 'Enter parent folder ID (leave empty for root folder)',
       mode: 'advanced',
       condition: { field: 'operation', value: 'upload' },
@@ -150,6 +153,7 @@ export const GoogleDriveBlock: BlockConfig<GoogleDriveResponse> = {
       title: 'Select Parent Folder',
       type: 'file-selector',
       layout: 'full',
+      canonicalParamId: 'folderId',
       provider: 'google-drive',
       serviceId: 'google-drive',
       requiredScopes: ['https://www.googleapis.com/auth/drive.file'],
@@ -165,6 +169,7 @@ export const GoogleDriveBlock: BlockConfig<GoogleDriveResponse> = {
       title: 'Parent Folder ID',
       type: 'short-input',
       layout: 'full',
+      canonicalParamId: 'folderId',
       placeholder: 'Enter parent folder ID (leave empty for root folder)',
       mode: 'advanced',
       condition: { field: 'operation', value: 'create_folder' },
@@ -175,6 +180,7 @@ export const GoogleDriveBlock: BlockConfig<GoogleDriveResponse> = {
       title: 'Select Folder',
       type: 'file-selector',
       layout: 'full',
+      canonicalParamId: 'folderId',
       provider: 'google-drive',
       serviceId: 'google-drive',
       requiredScopes: ['https://www.googleapis.com/auth/drive.file'],
@@ -190,6 +196,7 @@ export const GoogleDriveBlock: BlockConfig<GoogleDriveResponse> = {
       title: 'Folder ID',
       type: 'short-input',
       layout: 'full',
+      canonicalParamId: 'folderId',
       placeholder: 'Enter folder ID (leave empty for root folder)',
       mode: 'advanced',
       condition: { field: 'operation', value: 'list' },
@@ -233,8 +240,8 @@ export const GoogleDriveBlock: BlockConfig<GoogleDriveResponse> = {
         const effectiveFolderId = (folderSelector || manualFolderId || '').trim()
 
         return {
-          accessToken: credential,
-          folderId: effectiveFolderId,
+          credential,
+          folderId: effectiveFolderId || undefined,
           pageSize: rest.pageSize ? Number.parseInt(rest.pageSize as string, 10) : undefined,
           mimeType: mimeType,
           ...rest,

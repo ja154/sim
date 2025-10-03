@@ -1,12 +1,12 @@
 #!/usr/bin/env bun
 
 import path from 'path'
+import { db } from '@sim/db'
+import { docsEmbeddings } from '@sim/db/schema'
 import { sql } from 'drizzle-orm'
 import { isDev } from '@/lib/environment'
 import { DocsChunker } from '@/lib/knowledge/documents/docs-chunker'
 import { createLogger } from '@/lib/logs/console/logger'
-import { db } from '@/db'
-import { docsEmbeddings } from '@/db/schema'
 
 const logger = createLogger('ProcessDocsEmbeddings')
 
@@ -37,7 +37,7 @@ async function processDocsEmbeddings(options: ProcessingOptions = {}) {
     // Configuration
     const config = {
       clearExisting: options.clearExisting ?? false,
-      docsPath: options.docsPath ?? path.join(process.cwd(), '../../apps/docs/content/docs'),
+      docsPath: options.docsPath ?? path.join(process.cwd(), '../../apps/docs/content/docs/en'),
       baseUrl: options.baseUrl ?? (isDev ? 'http://localhost:3001' : 'https://docs.sim.ai'),
       chunkSize: options.chunkSize ?? 300, // Max 300 tokens per chunk
       minChunkSize: options.minChunkSize ?? 100,

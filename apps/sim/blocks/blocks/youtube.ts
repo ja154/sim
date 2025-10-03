@@ -1,17 +1,20 @@
 import { YouTubeIcon } from '@/components/icons'
-import type { BlockConfig } from '@/blocks/types'
+import type { BlockConfig, BlockIcon } from '@/blocks/types'
+import { AuthMode } from '@/blocks/types'
 import type { YouTubeSearchResponse } from '@/tools/youtube/types'
+
+const YouTubeBlockIcon: BlockIcon = (props) => YouTubeIcon(props as any)
 
 export const YouTubeBlock: BlockConfig<YouTubeSearchResponse> = {
   type: 'youtube',
   name: 'YouTube',
   description: 'Search for videos on YouTube',
-  longDescription:
-    'Find relevant videos on YouTube using the YouTube Data API. Search for content with customizable result limits and retrieve structured video metadata for integration into your workflow.',
+  authMode: AuthMode.ApiKey,
+  longDescription: 'Integrate YouTube into the workflow. Can search for videos.',
   docsLink: 'https://docs.sim.ai/tools/youtube',
   category: 'tools',
   bgColor: '#FF0000',
-  icon: YouTubeIcon,
+  icon: YouTubeBlockIcon,
   subBlocks: [
     {
       id: 'query',

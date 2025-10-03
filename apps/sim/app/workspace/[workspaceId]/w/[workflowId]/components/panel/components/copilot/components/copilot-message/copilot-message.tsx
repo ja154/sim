@@ -3,7 +3,9 @@
 import { type FC, memo, useEffect, useMemo, useState } from 'react'
 import {
   Blocks,
+  BookOpen,
   Bot,
+  Box,
   Check,
   Clipboard,
   Info,
@@ -11,6 +13,7 @@ import {
   Loader2,
   RotateCcw,
   Shapes,
+  SquareChevronRight,
   ThumbsDown,
   ThumbsUp,
   Workflow,
@@ -61,7 +64,7 @@ const CopilotMessage: FC<CopilotMessageProps> = memo(
     const { getPreviewByToolCall, getLatestPendingPreview } = usePreviewStore()
 
     // Import COPILOT_TOOL_IDS - placing it here since it's needed in multiple functions
-    const WORKFLOW_TOOL_NAMES = ['build_workflow', 'edit_workflow']
+    const WORKFLOW_TOOL_NAMES = ['edit_workflow']
 
     // Get checkpoints for this message if it's a user message
     const messageCheckpoints = isUser ? allMessageCheckpoints[message.id] || [] : []
@@ -115,7 +118,7 @@ const CopilotMessage: FC<CopilotMessageProps> = memo(
           .map((block) => (block as any).toolCall),
       ]
 
-      // Find workflow tools (build_workflow or edit_workflow)
+      // Find workflow tools (edit_workflow)
       const workflowTools = allToolCalls.filter((toolCall) =>
         WORKFLOW_TOOL_NAMES.includes(toolCall?.name)
       )
@@ -389,7 +392,9 @@ const CopilotMessage: FC<CopilotMessageProps> = memo(
                     const fromBlock = Array.isArray((block as any)?.contexts)
                       ? ((block as any).contexts as any[])
                       : []
-                    const allContexts = direct.length > 0 ? direct : fromBlock
+                    const allContexts = (direct.length > 0 ? direct : fromBlock).filter(
+                      (c: any) => c?.kind !== 'current_workflow'
+                    )
                     const MAX_VISIBLE = 4
                     const visible = showAllContexts
                       ? allContexts
@@ -404,14 +409,20 @@ const CopilotMessage: FC<CopilotMessageProps> = memo(
                           >
                             {ctx?.kind === 'past_chat' ? (
                               <Bot className='h-3 w-3 text-muted-foreground' />
-                            ) : ctx?.kind === 'workflow' ? (
+                            ) : ctx?.kind === 'workflow' || ctx?.kind === 'current_workflow' ? (
                               <Workflow className='h-3 w-3 text-muted-foreground' />
                             ) : ctx?.kind === 'blocks' ? (
                               <Blocks className='h-3 w-3 text-muted-foreground' />
+                            ) : ctx?.kind === 'workflow_block' ? (
+                              <Box className='h-3 w-3 text-muted-foreground' />
                             ) : ctx?.kind === 'knowledge' ? (
                               <LibraryBig className='h-3 w-3 text-muted-foreground' />
                             ) : ctx?.kind === 'templates' ? (
                               <Shapes className='h-3 w-3 text-muted-foreground' />
+                            ) : ctx?.kind === 'docs' ? (
+                              <BookOpen className='h-3 w-3 text-muted-foreground' />
+                            ) : ctx?.kind === 'logs' ? (
+                              <SquareChevronRight className='h-3 w-3 text-muted-foreground' />
                             ) : (
                               <Info className='h-3 w-3 text-muted-foreground' />
                             )}
@@ -445,46 +456,6 @@ const CopilotMessage: FC<CopilotMessageProps> = memo(
           ) : null}
 
           <div className='flex items-center justify-end gap-0'>
-            {hasCheckpoints && (
-              <div className='mr-1 inline-flex items-center justify-center'>
-                {showRestoreConfirmation ? (
-                  <div className='inline-flex items-center gap-1'>
-                    <button
-                      onClick={handleConfirmRevert}
-                      disabled={isRevertingCheckpoint}
-                      className='text-muted-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
-                      title='Confirm restore'
-                      aria-label='Confirm restore'
-                    >
-                      {isRevertingCheckpoint ? (
-                        <Loader2 className='h-3 w-3 animate-spin' />
-                      ) : (
-                        <Check className='h-3 w-3' />
-                      )}
-                    </button>
-                    <button
-                      onClick={handleCancelRevert}
-                      disabled={isRevertingCheckpoint}
-                      className='text-muted-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
-                      title='Cancel restore'
-                      aria-label='Cancel restore'
-                    >
-                      <X className='h-3 w-3' />
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={handleRevertToCheckpoint}
-                    disabled={isRevertingCheckpoint}
-                    className='text-muted-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
-                    title='Restore workflow to this checkpoint state'
-                    aria-label='Restore'
-                  >
-                    <RotateCcw className='h-3 w-3' />
-                  </button>
-                )}
-              </div>
-            )}
             <div className='min-w-0 max-w-[80%]'>
               {/* Message content in purple box */}
               <div
@@ -500,7 +471,10 @@ const CopilotMessage: FC<CopilotMessageProps> = memo(
                     const contexts: any[] = Array.isArray((message as any).contexts)
                       ? ((message as any).contexts as any[])
                       : []
-                    const labels = contexts.map((c) => c?.label).filter(Boolean) as string[]
+                    const labels = contexts
+                      .filter((c) => c?.kind !== 'current_workflow')
+                      .map((c) => c?.label)
+                      .filter(Boolean) as string[]
                     if (!labels.length) return <WordWrap text={text} />
 
                     const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -530,6 +504,48 @@ const CopilotMessage: FC<CopilotMessageProps> = memo(
                   })()}
                 </div>
               </div>
+              {hasCheckpoints && (
+                <div className='mt-1 flex h-6 items-center justify-end'>
+                  {showRestoreConfirmation ? (
+                    <div className='inline-flex items-center gap-1 rounded px-1 py-0.5 text-[11px] text-muted-foreground'>
+                      <span>Restore Checkpoint?</span>
+                      <button
+                        onClick={handleConfirmRevert}
+                        disabled={isRevertingCheckpoint}
+                        className='transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
+                        title='Confirm restore'
+                        aria-label='Confirm restore'
+                      >
+                        {isRevertingCheckpoint ? (
+                          <Loader2 className='h-3 w-3 animate-spin' />
+                        ) : (
+                          <Check className='h-3 w-3' />
+                        )}
+                      </button>
+                      <button
+                        onClick={handleCancelRevert}
+                        disabled={isRevertingCheckpoint}
+                        className='transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
+                        title='Cancel restore'
+                        aria-label='Cancel restore'
+                      >
+                        <X className='h-3 w-3' />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={handleRevertToCheckpoint}
+                      disabled={isRevertingCheckpoint}
+                      className='inline-flex items-center gap-1 text-muted-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
+                      title='Restore workflow to this checkpoint state'
+                      aria-label='Restore'
+                    >
+                      <span className='text-[11px]'>Restore</span>
+                      <RotateCcw className='h-3 w-3' />
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>

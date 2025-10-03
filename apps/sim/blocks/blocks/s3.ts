@@ -1,12 +1,15 @@
 import { S3Icon } from '@/components/icons'
 import type { BlockConfig } from '@/blocks/types'
+import { AuthMode } from '@/blocks/types'
 import type { S3Response } from '@/tools/s3/types'
 
 export const S3Block: BlockConfig<S3Response> = {
   type: 's3',
   name: 'S3',
   description: 'View S3 files',
-  longDescription: 'Retrieve and view files from Amazon S3 buckets using presigned URLs.',
+  authMode: AuthMode.ApiKey,
+  longDescription:
+    'Integrate S3 into the workflow. Can get presigned URLs for S3 objects. Requires access key and secret access key.',
   docsLink: 'https://docs.sim.ai/tools/s3',
   category: 'tools',
   bgColor: '#E0E0E0',

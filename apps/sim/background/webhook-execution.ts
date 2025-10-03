@@ -1,16 +1,21 @@
+import { db } from '@sim/db'
+import { userStats, webhook, workflow as workflowTable } from '@sim/db/schema'
 import { task } from '@trigger.dev/sdk'
 import { eq, sql } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import { checkServerSideUsageLimits } from '@/lib/billing'
+import { getPersonalAndWorkspaceEnv } from '@/lib/environment/utils'
+import { IdempotencyService, webhookIdempotency } from '@/lib/idempotency'
 import { createLogger } from '@/lib/logs/console/logger'
 import { LoggingSession } from '@/lib/logs/execution/logging-session'
 import { buildTraceSpans } from '@/lib/logs/execution/trace-spans/trace-spans'
 import { decryptSecret } from '@/lib/utils'
 import { fetchAndProcessAirtablePayloads, formatWebhookInput } from '@/lib/webhooks/utils'
-import { loadWorkflowFromNormalizedTables } from '@/lib/workflows/db-helpers'
+import {
+  loadDeployedWorkflowState,
+  loadWorkflowFromNormalizedTables,
+} from '@/lib/workflows/db-helpers'
 import { updateWorkflowRunCounts } from '@/lib/workflows/utils'
-import { db } from '@/db'
-import { environment as environmentTable, userStats, webhook } from '@/db/schema'
 import { Executor } from '@/executor'
 import { Serializer } from '@/serializer'
 import { mergeSubblockState } from '@/stores/workflows/server-utils'
@@ -26,6 +31,8 @@ export type WebhookExecutionPayload = {
   headers: Record<string, string>
   path: string
   blockId?: string
+  testMode?: boolean
+  executionTarget?: 'deployed' | 'live'
 }
 
 export async function executeWebhookJob(payload: WebhookExecutionPayload) {
@@ -40,11 +47,30 @@ export async function executeWebhookJob(payload: WebhookExecutionPayload) {
     executionId,
   })
 
-  // Initialize logging session outside try block so it's available in catch
+  const idempotencyKey = IdempotencyService.createWebhookIdempotencyKey(
+    payload.webhookId,
+    payload.headers
+  )
+
+  const runOperation = async () => {
+    return await executeWebhookJobInternal(payload, executionId, requestId)
+  }
+
+  return await webhookIdempotency.executeWithIdempotency(
+    payload.provider,
+    idempotencyKey,
+    runOperation
+  )
+}
+
+async function executeWebhookJobInternal(
+  payload: WebhookExecutionPayload,
+  executionId: string,
+  requestId: string
+) {
   const loggingSession = new LoggingSession(payload.workflowId, executionId, 'webhook', requestId)
 
   try {
-    // Check usage limits first
     const usageCheck = await checkServerSideUsageLimits(payload.userId)
     if (usageCheck.isExceeded) {
       logger.warn(
@@ -61,44 +87,46 @@ export async function executeWebhookJob(payload: WebhookExecutionPayload) {
       )
     }
 
-    // Load workflow from normalized tables
-    const workflowData = await loadWorkflowFromNormalizedTables(payload.workflowId)
+    // Load workflow state based on execution target
+    const workflowData =
+      payload.executionTarget === 'live'
+        ? await loadWorkflowFromNormalizedTables(payload.workflowId)
+        : await loadDeployedWorkflowState(payload.workflowId)
     if (!workflowData) {
-      throw new Error(`Workflow not found: ${payload.workflowId}`)
+      throw new Error(`Workflow ${payload.workflowId} has no live normalized state`)
     }
 
     const { blocks, edges, loops, parallels } = workflowData
 
-    // Get environment variables (matching workflow-execution pattern)
-    const [userEnv] = await db
-      .select()
-      .from(environmentTable)
-      .where(eq(environmentTable.userId, payload.userId))
+    const wfRows = await db
+      .select({ workspaceId: workflowTable.workspaceId })
+      .from(workflowTable)
+      .where(eq(workflowTable.id, payload.workflowId))
       .limit(1)
+    const workspaceId = wfRows[0]?.workspaceId || undefined
 
-    let decryptedEnvVars: Record<string, string> = {}
-    if (userEnv) {
-      const decryptionPromises = Object.entries((userEnv.variables as any) || {}).map(
-        async ([key, encryptedValue]) => {
-          try {
-            const { decrypted } = await decryptSecret(encryptedValue as string)
-            return [key, decrypted] as const
-          } catch (error: any) {
-            logger.error(`[${requestId}] Failed to decrypt environment variable "${key}":`, error)
-            throw new Error(`Failed to decrypt environment variable "${key}": ${error.message}`)
-          }
-        }
-      )
-
-      const decryptedPairs = await Promise.all(decryptionPromises)
-      decryptedEnvVars = Object.fromEntries(decryptedPairs)
-    }
+    const { personalEncrypted, workspaceEncrypted } = await getPersonalAndWorkspaceEnv(
+      payload.userId,
+      workspaceId
+    )
+    const mergedEncrypted = { ...personalEncrypted, ...workspaceEncrypted }
+    const decryptedPairs = await Promise.all(
+      Object.entries(mergedEncrypted).map(async ([key, encrypted]) => {
+        const { decrypted } = await decryptSecret(encrypted)
+        return [key, decrypted] as const
+      })
+    )
+    const decryptedEnvVars: Record<string, string> = Object.fromEntries(decryptedPairs)
 
     // Start logging session
     await loggingSession.safeStart({
       userId: payload.userId,
-      workspaceId: '', // TODO: Get from workflow if needed
+      workspaceId: workspaceId || '',
       variables: decryptedEnvVars,
+      triggerData: {
+        isTest: payload.testMode === true,
+        executionTarget: payload.executionTarget || 'deployed',
+      },
     })
 
     // Merge subblock states (matching workflow-execution pattern)
@@ -179,7 +207,8 @@ export async function executeWebhookJob(payload: WebhookExecutionPayload) {
           workflowVariables,
           contextExtensions: {
             executionId,
-            workspaceId: '',
+            workspaceId: workspaceId || '',
+            isDeployedContext: !payload.testMode,
           },
         })
 
@@ -291,7 +320,8 @@ export async function executeWebhookJob(payload: WebhookExecutionPayload) {
       workflowVariables,
       contextExtensions: {
         executionId,
-        workspaceId: '', // TODO: Get from workflow if needed - see comment on line 103
+        workspaceId: workspaceId || '',
+        isDeployedContext: !payload.testMode,
       },
     })
 
@@ -316,14 +346,16 @@ export async function executeWebhookJob(payload: WebhookExecutionPayload) {
     if (executionResult.success) {
       await updateWorkflowRunCounts(payload.workflowId)
 
-      // Track execution in user stats
-      await db
-        .update(userStats)
-        .set({
-          totalWebhookTriggers: sql`total_webhook_triggers + 1`,
-          lastActive: sql`now()`,
-        })
-        .where(eq(userStats.userId, payload.userId))
+      // Track execution in user stats (skip in test mode)
+      if (!payload.testMode) {
+        await db
+          .update(userStats)
+          .set({
+            totalWebhookTriggers: sql`total_webhook_triggers + 1`,
+            lastActive: sql`now()`,
+          })
+          .where(eq(userStats.userId, payload.userId))
+      }
     }
 
     // Build trace spans and complete logging session

@@ -1,7 +1,6 @@
-import { withSentryConfig } from '@sentry/nextjs'
 import type { NextConfig } from 'next'
 import { env, isTruthy } from './lib/env'
-import { isDev, isHosted, isProd } from './lib/environment'
+import { isDev, isHosted } from './lib/environment'
 import { getMainCSPPolicy, getWorkflowExecutionCSPPolicy } from './lib/security/csp'
 
 const nextConfig: NextConfig = {
@@ -43,6 +42,36 @@ const nextConfig: NextConfig = {
             },
           ]
         : []),
+      // Brand logo domain if configured
+      ...(env.NEXT_PUBLIC_BRAND_LOGO_URL
+        ? (() => {
+            try {
+              return [
+                {
+                  protocol: 'https' as const,
+                  hostname: new URL(env.NEXT_PUBLIC_BRAND_LOGO_URL).hostname,
+                },
+              ]
+            } catch {
+              return []
+            }
+          })()
+        : []),
+      // Brand favicon domain if configured
+      ...(env.NEXT_PUBLIC_BRAND_FAVICON_URL
+        ? (() => {
+            try {
+              return [
+                {
+                  protocol: 'https' as const,
+                  hostname: new URL(env.NEXT_PUBLIC_BRAND_FAVICON_URL).hostname,
+                },
+              ]
+            } catch {
+              return []
+            }
+          })()
+        : []),
     ],
   },
   typescript: {
@@ -55,6 +84,7 @@ const nextConfig: NextConfig = {
   turbopack: {
     resolveExtensions: ['.tsx', '.ts', '.jsx', '.js', '.mjs', '.json'],
   },
+  serverExternalPackages: ['pdf-parse'],
   experimental: {
     optimizeCss: true,
     turbopackSourceMaps: false,
@@ -80,6 +110,7 @@ const nextConfig: NextConfig = {
     '@react-email/render',
     '@t3-oss/env-nextjs',
     '@t3-oss/env-core',
+    '@sim/db',
   ],
   async headers() {
     return [
@@ -186,22 +217,6 @@ const nextConfig: NextConfig = {
   },
   async redirects() {
     const redirects = []
-    // Add whitelabel redirects for terms and privacy pages if external URLs are configured
-    if (env.NEXT_PUBLIC_TERMS_URL?.startsWith('http')) {
-      redirects.push({
-        source: '/terms',
-        destination: env.NEXT_PUBLIC_TERMS_URL,
-        permanent: false,
-      })
-    }
-
-    if (env.NEXT_PUBLIC_PRIVACY_URL?.startsWith('http')) {
-      redirects.push({
-        source: '/privacy',
-        destination: env.NEXT_PUBLIC_PRIVACY_URL,
-        permanent: false,
-      })
-    }
 
     // Only enable domain redirects for the hosted version
     if (isHosted) {
@@ -223,22 +238,22 @@ const nextConfig: NextConfig = {
 
     return redirects
   },
-}
+  async rewrites() {
+    if (!isTruthy(env.POSTHOG_ENABLED)) {
+      return []
+    }
 
-const sentryConfig = {
-  silent: true,
-  org: env.SENTRY_ORG || '',
-  project: env.SENTRY_PROJECT || '',
-  authToken: env.SENTRY_AUTH_TOKEN || undefined,
-  disableSourceMapUpload: !isProd,
-  autoInstrumentServerFunctions: isProd,
-  bundleSizeOptimizations: {
-    excludeDebugStatements: true,
-    excludePerformanceMonitoring: true,
-    excludeReplayIframe: true,
-    excludeReplayShadowDom: true,
-    excludeReplayWorker: true,
+    return [
+      {
+        source: '/ingest/static/:path*',
+        destination: 'https://us-assets.i.posthog.com/static/:path*',
+      },
+      {
+        source: '/ingest/:path*',
+        destination: 'https://us.i.posthog.com/:path*',
+      },
+    ]
   },
 }
 
-export default isDev ? nextConfig : withSentryConfig(nextConfig, sentryConfig)
+export default nextConfig
